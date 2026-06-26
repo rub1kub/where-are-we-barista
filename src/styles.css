@@ -796,20 +796,20 @@ input[type="range"] {
 
 .flight3d-hud {
   position: absolute;
-  left: 9px;
-  right: 9px;
-  bottom: 9px;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 7px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
   pointer-events: none;
 }
 
 .flight3d-hud span {
-  padding: 7px 8px;
+  padding: 8px 10px;
   border: 1px solid rgba(156, 247, 207, 0.28);
   border-radius: 0;
-  background: rgba(5, 14, 18, 0.72);
+  background: rgba(5, 14, 18, 0.62);
   color: #dcfffa;
   font-size: 10px;
   font-weight: 900;
