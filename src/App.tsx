@@ -84,7 +84,7 @@ function ToggleRow({ label, enabled }: { label: string; enabled: boolean }) {
   return (
     <div className="toggle-row">
       <span>{label}</span>
-      <i className={enabled ? "enabled" : ""}>{enabled ? "OK" : "OFF"}</i>
+      <i className={enabled ? "enabled" : ""}>{enabled ? "НОРМА" : "НЕТ"}</i>
     </div>
   );
 }
@@ -457,7 +457,7 @@ function ValidationPanel({ result, finalErrorDeg }: { result: TerrainMatchResult
       <div className="fact-list">
         <div><Gauge size={17} /><span>corr: <b>{result.best.correlation.toFixed(3)}</b></span></div>
         <div><Activity size={17} /><span>Δaz: <b>{formatNumber(finalErrorDeg, 0)}°</b></span></div>
-        <div><Clock3 size={17} /><span>compute: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
+        <div><Clock3 size={17} /><span>расчёт: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
         <div><AlertTriangle size={17} /><span>защита плоского рельефа: снижает доверие</span></div>
       </div>
     </section>
@@ -532,7 +532,7 @@ export function App() {
             <InputRow
               label="ЦМР"
               value={TAIGA_ROUTE.demName}
-              help="Цифровая модель рельефа. В production заменяется на Copernicus GLO-30, SRTM или ALOS."
+              help="Цифровая модель рельефа. В рабочем контуре заменяется на Copernicus GLO-30, SRTM или ALOS."
             />
             <InputRow
               label="БАРО MSL"

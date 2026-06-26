@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { COPERNICUS_TAIGA_DEM } from "./copernicusDemSample";
-import { MatchPoint, TerrainMatchResult, localPointToWgs84 } from "./terrainMatcher";
+import { MatchPoint, TerrainMatchResult, localPointToWgs84, routeLengthM } from "./terrainMatcher";
 
 type FlightPreview3DProps = {
   result: TerrainMatchResult;
@@ -13,6 +13,9 @@ const TERRAIN_SEGMENTS_X = 180;
 const TERRAIN_SEGMENTS_Z = 72;
 const TEXTURE_WIDTH = 1024;
 const TEXTURE_HEIGHT = 512;
+const SATELLITE_TILE_SIZE = 256;
+const SATELLITE_ZOOM = 9;
+const REPLAY_SPEED_MULTIPLIER = 120;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -51,10 +54,31 @@ function sampleDemLatLon(lat: number, lon: number): number {
   return top * (1 - ty) + bottom * ty;
 }
 
+function sampleSmoothedDemLatLon(lat: number, lon: number): number {
+  const offsets = [
+    [0, 0, 4],
+    [0.006, 0, 1],
+    [-0.006, 0, 1],
+    [0, 0.006, 1],
+    [0, -0.006, 1],
+    [0.004, 0.004, 0.7],
+    [0.004, -0.004, 0.7],
+    [-0.004, 0.004, 0.7],
+    [-0.004, -0.004, 0.7],
+  ];
+  let sum = 0;
+  let weight = 0;
+  for (const [dLat, dLon, itemWeight] of offsets) {
+    sum += sampleDemLatLon(lat + dLat, lon + dLon) * itemWeight;
+    weight += itemWeight;
+  }
+  return sum / weight;
+}
+
 function elevationToSceneY(elevationM: number): number {
   const min = COPERNICUS_TAIGA_DEM.minElevationM;
   const max = COPERNICUS_TAIGA_DEM.maxElevationM;
-  return ((elevationM - min) / Math.max(1, max - min) - 0.46) * 2.35;
+  return ((elevationM - min) / Math.max(1, max - min) - 0.46) * 1.18;
 }
 
 function sceneToLatLon(x: number, z: number) {
@@ -73,7 +97,84 @@ function wgsToScene(lat: number, lon: number, elevationM = sampleDemLatLon(lat, 
 
 function terrainYAtScene(x: number, z: number): number {
   const { lat, lon } = sceneToLatLon(x, z);
-  return elevationToSceneY(sampleDemLatLon(lat, lon));
+  return elevationToSceneY(sampleSmoothedDemLatLon(lat, lon));
+}
+
+function tileProject(lat: number, lon: number, zoom: number) {
+  const scale = 2 ** zoom;
+  const x = ((lon + 180) / 360) * scale;
+  const latRad = (lat * Math.PI) / 180;
+  const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale;
+  return { x, y };
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Tile load failed: ${src}`));
+    image.src = src;
+  });
+}
+
+async function makeSatelliteTexture(): Promise<THREE.CanvasTexture> {
+  const canvas = document.createElement("canvas");
+  canvas.width = TEXTURE_WIDTH;
+  canvas.height = TEXTURE_HEIGHT;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas 2D context is unavailable");
+
+  const { bounds } = COPERNICUS_TAIGA_DEM;
+  const topLeft = tileProject(bounds.latMax, bounds.lonMin, SATELLITE_ZOOM);
+  const bottomRight = tileProject(bounds.latMin, bounds.lonMax, SATELLITE_ZOOM);
+  const projectedWidth = Math.max(0.0001, bottomRight.x - topLeft.x);
+  const projectedHeight = Math.max(0.0001, bottomRight.y - topLeft.y);
+  const tileMinX = Math.floor(topLeft.x);
+  const tileMaxX = Math.ceil(bottomRight.x);
+  const tileMinY = Math.floor(topLeft.y);
+  const tileMaxY = Math.ceil(bottomRight.y);
+  const tiles: Promise<void>[] = [];
+
+  context.fillStyle = "#173222";
+  context.fillRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+
+  for (let x = tileMinX; x <= tileMaxX; x += 1) {
+    for (let y = tileMinY; y <= tileMaxY; y += 1) {
+      tiles.push(
+        loadImage(`https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${SATELLITE_ZOOM}/${y}/${x}`).then(
+          (image) => {
+            const dx = ((x - topLeft.x) / projectedWidth) * TEXTURE_WIDTH;
+            const dy = ((y - topLeft.y) / projectedHeight) * TEXTURE_HEIGHT;
+            const dw = (1 / projectedWidth) * TEXTURE_WIDTH;
+            const dh = (1 / projectedHeight) * TEXTURE_HEIGHT;
+            context.drawImage(image, 0, 0, SATELLITE_TILE_SIZE, SATELLITE_TILE_SIZE, dx, dy, dw, dh);
+          },
+        ),
+      );
+    }
+  }
+
+  const settled = await Promise.allSettled(tiles);
+  const loaded = settled.filter((item) => item.status === "fulfilled").length;
+  if (loaded < Math.max(4, tiles.length * 0.45)) {
+    throw new Error("Not enough satellite tiles loaded");
+  }
+
+  context.globalCompositeOperation = "multiply";
+  context.fillStyle = "rgba(4, 18, 16, 0.42)";
+  context.fillRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+  context.globalCompositeOperation = "source-over";
+  context.fillStyle = "rgba(42, 212, 191, 0.06)";
+  context.fillRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function colorMix(a: number[], b: number[], t: number): number[] {
@@ -186,9 +287,22 @@ function makeTerrainMesh(texture: THREE.Texture): THREE.Mesh {
   );
 }
 
+function makeHorizonPlane(): THREE.Mesh {
+  const geometry = new THREE.PlaneGeometry(SCENE_WIDTH * 2.4, SCENE_DEPTH * 2.25, 1, 1);
+  geometry.rotateX(-Math.PI / 2);
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({
+      color: 0x10271c,
+    }),
+  );
+  mesh.position.y = elevationToSceneY(COPERNICUS_TAIGA_DEM.minElevationM) - 0.08;
+  return mesh;
+}
+
 function pointToScene(point: MatchPoint, clearance = 0.05): THREE.Vector3 {
   const wgs = localPointToWgs84(point);
-  const scenePoint = wgsToScene(wgs.lat, wgs.lon, point.elevationM);
+  const scenePoint = wgsToScene(wgs.lat, wgs.lon, sampleSmoothedDemLatLon(wgs.lat, wgs.lon));
   scenePoint.y += clearance;
   return scenePoint;
 }
@@ -213,6 +327,58 @@ function makeRouteTube(points: THREE.Vector3[], color: number, radius: number, o
       roughness: 0.28,
     }),
   );
+}
+
+function makeRouteRibbon(points: THREE.Vector3[]): THREE.Mesh {
+  const curve = new THREE.CatmullRomCurve3(points);
+  return new THREE.Mesh(
+    new THREE.TubeGeometry(curve, Math.max(80, points.length * 3), 0.032, 10, false),
+    new THREE.MeshStandardMaterial({
+      color: 0x39d9ff,
+      emissive: 0x1aa7c6,
+      emissiveIntensity: 0.16,
+      transparent: true,
+      opacity: 0.34,
+      roughness: 0.46,
+    }),
+  );
+}
+
+function clampToScene(point: THREE.Vector3): THREE.Vector3 {
+  return new THREE.Vector3(
+    clamp(point.x, -SCENE_WIDTH / 2 + 0.55, SCENE_WIDTH / 2 - 0.55),
+    point.y,
+    clamp(point.z, -SCENE_DEPTH / 2 + 0.35, SCENE_DEPTH / 2 - 0.35),
+  );
+}
+
+function buildReplayRoute(path: MatchPoint[]): THREE.Vector3[] {
+  const baseRoute = sampledPath(path, 260).map((point) => clampToScene(point));
+  const start = baseRoute[0];
+  const finish = baseRoute[baseRoute.length - 1];
+  const direction = finish.clone().sub(start);
+  direction.y = 0;
+  const routeSceneLength = Math.max(1, direction.length());
+  direction.normalize();
+  const side = new THREE.Vector3(-direction.z, 0, direction.x).normalize();
+  const bendScale = clamp(routeSceneLength * 0.16, 0.85, 2.15);
+
+  return baseRoute.map((point, index) => {
+    const t = index / Math.max(1, baseRoute.length - 1);
+    const routeEnvelope = Math.sin(Math.PI * t);
+    const longBend = Math.sin(Math.PI * 1.72 * t - 0.28) * 0.82 + Math.sin(Math.PI * 3.55 * t + 0.4) * 0.22;
+    const bent = point
+      .clone()
+      .add(side.clone().multiplyScalar(routeEnvelope * longBend * bendScale));
+    bent.x = clamp(bent.x, -SCENE_WIDTH / 2 + 0.55, SCENE_WIDTH / 2 - 0.55);
+    bent.z = clamp(bent.z, -SCENE_DEPTH / 2 + 0.35, SCENE_DEPTH / 2 - 0.35);
+    bent.y = terrainYAtScene(bent.x, bent.z) + 0.16;
+    return bent;
+  });
+}
+
+function routePosition(curve: THREE.CatmullRomCurve3, t: number): THREE.Vector3 {
+  return curve.getPointAt(clamp(t, 0, 1));
 }
 
 function makeWingGeometry(span: number, rootChord: number, tipChord: number): THREE.BufferGeometry {
@@ -244,7 +410,7 @@ function makeDrone() {
   group.add(fuselage);
 
   const nose = new THREE.Mesh(new THREE.ConeGeometry(0.092, 0.18, 24), accentMaterial);
-  nose.rotation.x = Math.PI / 2;
+  nose.rotation.x = -Math.PI / 2;
   nose.position.z = -0.52;
   group.add(nose);
 
@@ -258,25 +424,22 @@ function makeDrone() {
   tailWing.position.y = 0.025;
   group.add(tailWing);
 
+  const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.14, 24), darkMaterial);
+  engine.rotation.x = Math.PI / 2;
+  engine.position.z = 0.6;
+  group.add(engine);
+
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.28, 0.12), accentMaterial);
   fin.position.z = 0.42;
   fin.position.y = 0.16;
   group.add(fin);
 
   const prop = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.42, 0.018), darkMaterial);
-  prop.position.z = -0.64;
+  prop.position.z = 0.71;
   group.add(prop);
 
   group.scale.setScalar(0.52);
   return { group, prop };
-}
-
-function routePosition(route: THREE.Vector3[], t: number): THREE.Vector3 {
-  const scaled = clamp(t, 0, 1) * (route.length - 1);
-  const index = Math.floor(scaled);
-  const nextIndex = Math.min(route.length - 1, index + 1);
-  const localT = scaled - index;
-  return route[index].clone().lerp(route[nextIndex], localT);
 }
 
 export function FlightPreview3D({ result }: FlightPreview3DProps) {
@@ -305,14 +468,42 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
     sun.position.set(-5, 9, 6);
     scene.add(sun);
 
-    const texture = makeTerrainTexture();
-    const terrainMesh = makeTerrainMesh(texture);
+    scene.add(makeHorizonPlane());
+
+    let terrainTexture: THREE.Texture = makeTerrainTexture();
+    let disposed = false;
+    const terrainMesh = makeTerrainMesh(terrainTexture);
+    terrainMesh.scale.set(1.28, 1, 1.22);
+    const terrainMaterial = terrainMesh.material as THREE.MeshStandardMaterial;
     scene.add(terrainMesh);
 
-    const truthRoute = sampledPath(result.truthPath, 190);
-    const estimateRoute = sampledPath(result.estimatedPath, 190);
-    scene.add(makeRouteTube(truthRoute, 0x47d7ff, 0.018, 0.94));
-    scene.add(makeRouteTube(estimateRoute, 0x7cff9e, 0.014, 0.76));
+    void makeSatelliteTexture()
+      .then((satelliteTexture) => {
+        if (disposed) {
+          satelliteTexture.dispose();
+          return;
+        }
+        terrainTexture.dispose();
+        terrainTexture = satelliteTexture;
+        terrainMaterial.map = satelliteTexture;
+        terrainMaterial.color.set(0xffffff);
+        terrainMaterial.needsUpdate = true;
+      })
+      .catch(() => {
+        // Сеть для тайлов может отсутствовать на защите; fallback уже установлен.
+      });
+
+    const truthRoute = buildReplayRoute(result.truthPath);
+    const estimateRoute = buildReplayRoute(result.estimatedPath);
+    const replayCurve = new THREE.CatmullRomCurve3(truthRoute, false, "centripetal", 0.42);
+    const routeGroundMaxY = Math.max(...truthRoute.map((point) => point.y));
+    const replayRealDurationS = routeLengthM(result.truthPath) / Math.max(1, result.best.speedMps);
+    const cruiseY =
+      routeGroundMaxY +
+      clamp(((result.config.baroAltitudeM - COPERNICUS_TAIGA_DEM.minElevationM) / 1000) * 0.72, 0.95, 1.55);
+    scene.add(makeRouteRibbon(truthRoute));
+    scene.add(makeRouteTube(truthRoute, 0x47d7ff, 0.012, 0.82));
+    scene.add(makeRouteTube(estimateRoute, 0x7cff9e, 0.01, 0.58));
 
     const startMarker = new THREE.Mesh(
       new THREE.RingGeometry(0.11, 0.16, 24),
@@ -344,27 +535,37 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
 
     const animate = () => {
       const elapsed = clock.getElapsedTime();
-      const t = (elapsed * 0.035) % 1;
-      const base = routePosition(truthRoute, t);
-      const ahead = routePosition(truthRoute, Math.min(1, t + 0.012));
-      const tangent = ahead.clone().sub(base).normalize();
-      const groundY = terrainYAtScene(base.x, base.z);
-      const aglM = Math.max(80, result.config.baroAltitudeM - result.truthPath[result.truthPath.length - 1].elevationM);
-      const altitudeUnits = clamp((aglM / 1000) * 2.05, 1.18, 3.15);
+      const t = ((elapsed * REPLAY_SPEED_MULTIPLIER) % replayRealDurationS) / replayRealDurationS;
+      const baseGround = routePosition(replayCurve, t);
+      const aheadGround = routePosition(replayCurve, Math.min(0.999, t + 0.006));
+      const tangent = aheadGround.clone().sub(baseGround);
+      tangent.y = 0;
+      tangent.normalize();
+      const futureTangent = replayCurve.getTangentAt(Math.min(0.999, t + 0.03));
+      futureTangent.y = 0;
+      futureTangent.normalize();
+      const signedTurn = Math.atan2(
+        tangent.x * futureTangent.z - tangent.z * futureTangent.x,
+        tangent.x * futureTangent.x + tangent.z * futureTangent.z,
+      );
+      const bank = clamp(-signedTurn * 4.8, -0.34, 0.34);
+      const turbulenceY = Math.sin(elapsed * 0.63) * 0.012 + Math.sin(elapsed * 1.17) * 0.006;
+      const base = new THREE.Vector3(baseGround.x, cruiseY + turbulenceY, baseGround.z);
+      const ahead = new THREE.Vector3(aheadGround.x, cruiseY, aheadGround.z);
 
-      drone.position.set(base.x, groundY + altitudeUnits, base.z);
-      drone.lookAt(ahead.x, groundY + altitudeUnits + tangent.y, ahead.z);
-      drone.rotateZ(Math.sin(elapsed * 0.9) * 0.08);
-      prop.rotation.z += 1.15;
+      drone.position.copy(base);
+      drone.lookAt(ahead);
+      drone.rotateZ(bank);
+      prop.rotation.z += 1.28;
 
       const side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
       const cameraTarget = drone.position
         .clone()
-        .sub(tangent.clone().multiplyScalar(4.6))
-        .add(side.multiplyScalar(1.5))
-        .add(new THREE.Vector3(0, 3.0, 0));
-      camera.position.lerp(cameraTarget, 0.035);
-      camera.lookAt(drone.position.clone().add(tangent.clone().multiplyScalar(2.8)).add(new THREE.Vector3(0, -0.55, 0)));
+        .sub(tangent.clone().multiplyScalar(4.2))
+        .add(side.multiplyScalar(1.25))
+        .add(new THREE.Vector3(0, 2.15, 0));
+      camera.position.lerp(cameraTarget, 0.045);
+      camera.lookAt(drone.position.clone().add(tangent.clone().multiplyScalar(2.8)).add(new THREE.Vector3(0, -0.38, 0)));
 
       renderer.render(scene, camera);
       raf = requestAnimationFrame(animate);
@@ -372,6 +573,7 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
     animate();
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(raf);
       observer.disconnect();
       scene.traverse((object) => {
@@ -381,20 +583,21 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
         if (Array.isArray(material)) material.forEach((item) => item.dispose());
         else if (material) material.dispose();
       });
-      texture.dispose();
+      terrainTexture.dispose();
       renderer.dispose();
     };
   }, [result]);
 
   const last = result.truthPath[result.truthPath.length - 1];
   const agl = result.config.baroAltitudeM - last.elevationM;
+  const replayDurationMin = Math.round(routeLengthM(result.truthPath) / Math.max(1, result.best.speedMps) / 60);
 
   return (
     <section className="panel flight3d-panel">
       <header>
         <div>
           <span>Реконструкция полёта</span>
-          <h3>БВС над ЦМР Copernicus</h3>
+          <h3>БВС над спутниковой тайгой</h3>
         </div>
         <strong>{Math.round(agl)} м AGL</strong>
       </header>
@@ -404,7 +607,7 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
           <span>БАРО MSL {Math.round(result.config.baroAltitudeM)} м</span>
           <span>РВ AGL {Math.round(agl)} м</span>
           <span>Vпут {result.best.speedMps.toFixed(1)} м/с</span>
-          <span>corr {result.best.correlation.toFixed(3)}</span>
+          <span>Прокрутка x{REPLAY_SPEED_MULTIPLIER} · {replayDurationMin} мин</span>
         </div>
       </div>
     </section>

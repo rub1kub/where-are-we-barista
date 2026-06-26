@@ -63,6 +63,11 @@
         "lonMax": 105.65
       }
     },
+    "visualImagery": {
+      "activeSource": "ArcGIS World Imagery runtime tiles",
+      "usage": "только визуальная подложка для 3D-превью и карты; алгоритм использует ЦМР",
+      "fallback": "процедурная тайговая текстура в FlightPreview3D.tsx, если сеть или тайлы недоступны"
+    },
     "radioAltimeter": {
       "format": "NMEA-0183",
       "implementation": "src/nmeaRadioAltimeter.ts",
