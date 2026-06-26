@@ -13,7 +13,7 @@
                    ↓
         terrain_nav_service
                    ↓
- lat/lon + Vпут + азимут + confidence
+ local_x_m / local_y_m + lat/lon + Vпут + азимут + достоверность
                    ↓
    автопилот / операторский монитор / контур коррекции
 ```
@@ -31,13 +31,14 @@
 
 | Поле | Что значит | Куда передаётся |
 | --- | --- | --- |
+| `local_x_m` / `local_y_m` | локальные координаты на карте ЦМР, м | автопилот, монитор, журнал |
 | `lat` / `lon` | оценка координат WGS-84 | монитор, автопилот, журнал |
 | `ground_speed_mps` | путевая скорость | навигационный монитор |
 | `azimuth_deg` | путевой угол | контур коррекции курса |
 | `confidence` | достоверность оценки | логика принятия решения |
 | `uncertainty_m` | оценка радиуса ошибки | контроль безопасности |
 | `navigation_status` | `FIX VALID`, `FIX DEGRADED`, `FIX AMBIGUOUS`, `LOW RELIEF`, `NO FIX` | операторский статус |
-| `recommended_course_correction_deg` | advisory-поправка курса, если настроена | автопилот или оператор |
+| `course_correction_deg` | advisory-поправка курса, если настроена | автопилот или оператор |
 
 ## Режимы интеграции
 
@@ -47,6 +48,8 @@
 
 ```json
 {
+  "local_x_m": 158820,
+  "local_y_m": 54026,
   "lat": 60.829960,
   "lon": 105.488265,
   "ground_speed_mps": 44.0,
@@ -54,11 +57,11 @@
   "confidence": 0.90,
   "uncertainty_m": 42,
   "navigation_status": "FIX VALID",
-  "recommended_course_correction_deg": null
+  "course_correction_deg": null
 }
 ```
 
-В операторском интерфейсе `null` для `recommended_course_correction_deg` отображается как `not configured`: поправка курса в MVP не рассчитывается и не выдумывается.
+В операторском интерфейсе `null` для `course_correction_deg` отображается как `не настроено`: поправка курса в MVP не рассчитывается и не выдумывается.
 
 ### External navigation source
 

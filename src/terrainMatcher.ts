@@ -49,6 +49,8 @@ export type AlgorithmEvent = {
 };
 
 export type AutopilotOutput = {
+  localXM: number;
+  localYM: number;
   lat: number;
   lon: number;
   groundSpeedMps: number;
@@ -57,6 +59,14 @@ export type AutopilotOutput = {
   uncertaintyM: number | null;
   courseCorrectionDeg: number | null;
   navigationStatus: NavigationStatus;
+};
+
+export type NmeaQuality = {
+  total: number;
+  checksumOk: number;
+  checksumMissing: number;
+  checksumInvalid: number;
+  warning: string | null;
 };
 
 export type MatchPoint = {
@@ -113,6 +123,7 @@ export type TerrainMatchResult = {
   computeMs: number;
   events: AlgorithmEvent[];
   autopilotOutput: AutopilotOutput;
+  nmeaQuality: NmeaQuality;
 };
 
 export const TAIGA_ROUTE = {
@@ -323,7 +334,7 @@ function estimateConfidence(correlation: number, reliefM: number, ambiguity: num
   return Math.round((0.46 * corrScore + 0.22 * reliefScore + 0.12 * peakScore + 0.2 * rmseScore) * 100);
 }
 
-function classifyNavigationStatus(
+export function classifyNavigationStatus(
   confidence: number,
   terrainReliefM: number,
   terrainStdM: number,
@@ -404,6 +415,8 @@ function buildAutopilotOutput(
   const finalPoint = estimatedPath[estimatedPath.length - 1] ?? { x: 0, y: 0 };
   const wgs = localPointToWgs84(finalPoint);
   return {
+    localXM: finalPoint.x,
+    localYM: finalPoint.y,
     lat: wgs.lat,
     lon: wgs.lon,
     groundSpeedMps: best.speedMps,
@@ -412,6 +425,27 @@ function buildAutopilotOutput(
     uncertaintyM: estimateUncertaintyM(navigationStatus, best.confidence, ambiguity, best.rmseM, terrainStdM),
     courseCorrectionDeg: null,
     navigationStatus,
+  };
+}
+
+function summarizeNmeaQuality(samples: RadioAltimeterSample[]): NmeaQuality {
+  const checksumOk = samples.filter((sample) => sample.checksumStatus === "ok").length;
+  const checksumMissing = samples.filter((sample) => sample.checksumStatus === "missing").length;
+  const checksumInvalid = samples.filter((sample) => sample.checksumStatus === "invalid").length;
+  let warning: string | null = null;
+
+  if (checksumInvalid > 0) {
+    warning = `NMEA: ${checksumInvalid} строк с неверной контрольной суммой.`;
+  } else if (checksumMissing > 0) {
+    warning = `NMEA: ${checksumMissing} строк без контрольной суммы.`;
+  }
+
+  return {
+    total: samples.length,
+    checksumOk,
+    checksumMissing,
+    checksumInvalid,
+    warning,
   };
 }
 
@@ -483,6 +517,7 @@ export function solveFromMeasuredProfile({
   }
 
   const sampleCount = measuredProfile.length;
+  const nmeaQuality = summarizeNmeaQuality(samples);
   const terrainReliefM = measuredRelief(measuredProfile);
   const terrainStdM = standardDeviation(measuredProfile);
   const indexes = downsampleIndexes(sampleCount, 260);
@@ -578,7 +613,7 @@ export function solveFromMeasuredProfile({
     rmseM: Math.round(best.rmseM),
   });
 
-  const { navigationStatus, statusReason } = classifyNavigationStatus(
+  let { navigationStatus, statusReason } = classifyNavigationStatus(
     confidence,
     terrainReliefM,
     terrainStdM,
@@ -586,6 +621,14 @@ export function solveFromMeasuredProfile({
     best.correlation,
     best.rmseM,
   );
+  if (
+    nmeaQuality.total > 0 &&
+    nmeaQuality.checksumInvalid / nmeaQuality.total > 0.1 &&
+    navigationStatus === "FIX VALID"
+  ) {
+    navigationStatus = "FIX DEGRADED";
+    statusReason = `${statusReason} Контрольная сумма NMEA конфликтует более чем в 10% строк.`;
+  }
 
   const estimatedPath: MatchPoint[] = rawTimes.map((t) =>
     projectPoint(config.terrainKind, best.azimuthDeg, best.shiftM + best.speedMps * t, t),
@@ -623,6 +666,7 @@ export function solveFromMeasuredProfile({
     computeMs: performance.now() - startTime,
     events,
     autopilotOutput,
+    nmeaQuality,
   };
 }
 

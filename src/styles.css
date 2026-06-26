@@ -416,6 +416,16 @@ input[type="range"] {
   line-height: 1.4;
 }
 
+.input-warning {
+  margin: 0;
+  padding: 9px;
+  border: 1px solid rgba(255, 207, 102, 0.32);
+  color: #ffdf8a;
+  background: rgba(117, 83, 22, 0.14);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -609,6 +619,18 @@ input[type="range"] {
   stroke: #36d7ff;
 }
 
+.map-current-pulse {
+  fill: rgba(255, 207, 102, 0.12);
+  stroke: rgba(255, 207, 102, 0.8);
+  stroke-width: 3;
+}
+
+.map-current-dot {
+  fill: #ffcf66;
+  stroke: #071018;
+  stroke-width: 3;
+}
+
 .map-label,
 .map-scale {
   fill: #f4fffd;
@@ -648,6 +670,47 @@ input[type="range"] {
 
 .panel header {
   margin-bottom: 11px;
+}
+
+.nmea-empty-panel {
+  min-height: 420px;
+}
+
+.nmea-empty-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.nmea-empty-grid div {
+  border: 1px solid rgba(119, 151, 158, 0.2);
+  padding: 14px;
+  background: rgba(4, 11, 17, 0.58);
+}
+
+.nmea-empty-grid span {
+  display: block;
+  color: #93a5aa;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.nmea-empty-grid b {
+  display: block;
+  margin-top: 7px;
+  color: #f2fbf9;
+  font-size: 21px;
+}
+
+.nmea-empty-panel p {
+  margin: 0;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 207, 102, 0.28);
+  color: #d7e1df;
+  background: rgba(117, 83, 22, 0.11);
+  line-height: 1.5;
 }
 
 .panel header strong {
@@ -745,6 +808,13 @@ input[type="range"] {
   overflow-wrap: anywhere;
 }
 
+.no-output-panel .output-grid .wide b {
+  color: #ffdf8a;
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
 .event-log {
   display: grid;
   gap: 6px;
@@ -801,6 +871,33 @@ input[type="range"] {
   color: #f5fffd;
   font-size: 25px;
   line-height: 1.1;
+}
+
+.local-coordinates {
+  margin: -5px 0 15px;
+  padding: 10px;
+  border: 1px solid rgba(133, 160, 166, 0.13);
+  background: rgba(4, 11, 17, 0.42);
+}
+
+.local-coordinates span {
+  display: block;
+  color: #9fafb2;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.local-coordinates div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.local-coordinates b {
+  color: #9cf7cf;
+  font-size: 16px;
 }
 
 .decision-grid {

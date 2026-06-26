@@ -1,3 +1,5 @@
+export type NmeaChecksumStatus = "ok" | "missing" | "invalid";
+
 export type RadioAltimeterSample = {
   t: number;
   radioAltitudeM: number;
@@ -5,6 +7,7 @@ export type RadioAltimeterSample = {
   terrainMslM: number;
   sentence: string;
   checksumOk: boolean;
+  checksumStatus: NmeaChecksumStatus;
 };
 
 export function nmeaChecksum(payload: string): string {
@@ -53,9 +56,11 @@ export function parseGgaRadioSentence(sentence: string, baroAltitudeM: number): 
     throw new Error(`NMEA GGA radio altitude is missing: ${sentence}`);
   }
 
-  const checksumOk = providedChecksum
-    ? nmeaChecksum(payload) === providedChecksum.toUpperCase()
-    : false;
+  const expectedChecksum = nmeaChecksum(payload);
+  const normalizedChecksum = providedChecksum?.trim().toUpperCase();
+  const checksumStatus: NmeaChecksumStatus = normalizedChecksum
+    ? expectedChecksum === normalizedChecksum ? "ok" : "invalid"
+    : "missing";
 
   return {
     t: parseNmeaTime(fields[1] ?? "0"),
@@ -63,7 +68,8 @@ export function parseGgaRadioSentence(sentence: string, baroAltitudeM: number): 
     baroAltitudeM,
     terrainMslM: baroAltitudeM - radioAltitudeM,
     sentence: trimmed,
-    checksumOk,
+    checksumOk: checksumStatus === "ok",
+    checksumStatus,
   };
 }
 

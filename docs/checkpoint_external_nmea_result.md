@@ -22,18 +22,20 @@ examples/px4-derived-radio-altimeter.nmea
 | --- | --- |
 | Навигационный статус | `NO FIX` |
 | Причина | корреляционный пик не прошёл минимальные пороги качества |
-| corr best | 0.901 |
-| corr second | 0.901 |
-| ambiguity margin | 0.000 |
-| profile RMSE | 260 м |
-| compute time | 834 мс |
-| confidence | 39% |
-| terrain sigma | 16.9 м |
+| corr max | 0.901 |
+| corr второй | 0.901 |
+| зазор | 0.000 |
+| СКО профиля | 260 м |
+| время расчёта | около 1.6 с на MacBook Air M3 |
+| достоверность | 39% |
+| σ рельефа | 16.9 м |
 | truth | unavailable |
+| local_x_m | -13 108 м |
+| local_y_m | 40 342 м |
 | ground_speed_mps | 41.0 |
 | azimuth_deg | 342 |
 | uncertainty_m | н/д |
-| course_correction_deg | not configured |
+| course_correction_deg | не настроено |
 
 ## Интерпретация
 

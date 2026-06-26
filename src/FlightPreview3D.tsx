@@ -5,6 +5,15 @@ import { MatchPoint, TerrainMatchResult, localPointToWgs84, routeLengthM } from 
 
 type FlightPreview3DProps = {
   result: TerrainMatchResult;
+  replayState: FlightReplayState | null;
+  onReplayChange: (state: FlightReplayState) => void;
+};
+
+export type FlightReplayState = {
+  pointIndex: number;
+  elapsedS: number;
+  progress: number;
+  aglM: number;
 };
 
 const SCENE_WIDTH = 28;
@@ -353,27 +362,10 @@ function clampToScene(point: THREE.Vector3): THREE.Vector3 {
 }
 
 function buildReplayRoute(path: MatchPoint[]): THREE.Vector3[] {
-  const baseRoute = sampledPath(path, 260).map((point) => clampToScene(point));
-  const start = baseRoute[0];
-  const finish = baseRoute[baseRoute.length - 1];
-  const direction = finish.clone().sub(start);
-  direction.y = 0;
-  const routeSceneLength = Math.max(1, direction.length());
-  direction.normalize();
-  const side = new THREE.Vector3(-direction.z, 0, direction.x).normalize();
-  const bendScale = clamp(routeSceneLength * 0.16, 0.85, 2.15);
-
-  return baseRoute.map((point, index) => {
-    const t = index / Math.max(1, baseRoute.length - 1);
-    const routeEnvelope = Math.sin(Math.PI * t);
-    const longBend = Math.sin(Math.PI * 1.72 * t - 0.28) * 0.82 + Math.sin(Math.PI * 3.55 * t + 0.4) * 0.22;
-    const bent = point
-      .clone()
-      .add(side.clone().multiplyScalar(routeEnvelope * longBend * bendScale));
-    bent.x = clamp(bent.x, -SCENE_WIDTH / 2 + 0.55, SCENE_WIDTH / 2 - 0.55);
-    bent.z = clamp(bent.z, -SCENE_DEPTH / 2 + 0.35, SCENE_DEPTH / 2 - 0.35);
-    bent.y = terrainYAtScene(bent.x, bent.z) + 0.16;
-    return bent;
+  return sampledPath(path, 260).map((point) => {
+    const clamped = clampToScene(point);
+    clamped.y = terrainYAtScene(clamped.x, clamped.z) + 0.16;
+    return clamped;
   });
 }
 
@@ -442,7 +434,7 @@ function makeDrone() {
   return { group, prop };
 }
 
-export function FlightPreview3D({ result }: FlightPreview3DProps) {
+export function FlightPreview3D({ result, replayState, onReplayChange }: FlightPreview3DProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -534,14 +526,16 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
     observer.observe(canvas);
     resize();
 
-    const clock = new THREE.Clock();
+    const startedAtMs = performance.now();
     let raf = 0;
     const orientationProbe = new THREE.Object3D();
     let orientationInitialized = false;
+    let lastReplayEmitS = -1;
 
     const animate = () => {
-      const elapsed = clock.getElapsedTime();
+      const elapsed = (performance.now() - startedAtMs) / 1000;
       const t = ((elapsed * REPLAY_SPEED_MULTIPLIER) % replayRealDurationS) / replayRealDurationS;
+      const pointIndex = Math.min(primaryPath.length - 1, Math.max(0, Math.round(t * (primaryPath.length - 1))));
       const baseGround = routePosition(replayCurve, t);
       const aheadGround = routePosition(replayCurve, Math.min(0.999, t + 0.006));
       const tangent = aheadGround.clone().sub(baseGround);
@@ -562,6 +556,7 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
       drone.position.copy(base);
       orientationProbe.position.copy(base);
       orientationProbe.lookAt(ahead);
+      orientationProbe.rotateY(Math.PI);
       orientationProbe.rotateZ(bank);
       if (!orientationInitialized) {
         drone.quaternion.copy(orientationProbe.quaternion);
@@ -570,6 +565,17 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
         drone.quaternion.slerp(orientationProbe.quaternion, 0.14);
       }
       prop.rotation.z += 1.28;
+      if (elapsed - lastReplayEmitS > 0.24 || t < 0.01) {
+        const sample = result.samples[pointIndex];
+        const pathPoint = primaryPath[pointIndex];
+        onReplayChange({
+          pointIndex,
+          elapsedS: pathPoint?.t ?? t * replayRealDurationS,
+          progress: t,
+          aglM: sample ? sample.radioAltitudeM : result.config.baroAltitudeM - (pathPoint?.elevationM ?? 0),
+        });
+        lastReplayEmitS = elapsed;
+      }
 
       const side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
       const cameraTarget = drone.position
@@ -599,12 +605,11 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
       terrainTexture.dispose();
       renderer.dispose();
     };
-  }, [result]);
+  }, [onReplayChange, result]);
 
   const primaryPath = result.truthAvailable && result.truthPath.length > 1 ? result.truthPath : result.estimatedPath;
-  const last = primaryPath[primaryPath.length - 1];
-  const lastSample = result.samples[result.samples.length - 1];
-  const agl = lastSample ? lastSample.radioAltitudeM : result.config.baroAltitudeM - last.elevationM;
+  const fallbackPoint = primaryPath[0];
+  const agl = replayState?.aglM ?? (result.samples[0]?.radioAltitudeM ?? result.config.baroAltitudeM - fallbackPoint.elevationM);
   const replayDurationMin = Math.round(routeLengthM(primaryPath) / Math.max(1, result.best.speedMps) / 60);
 
   return (
@@ -623,6 +628,7 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
           <span>РВ AGL {Math.round(agl)} м</span>
           <span>Vпут {result.best.speedMps.toFixed(1)} м/с</span>
           <span>Источник {result.truthAvailable ? "стенд" : "NMEA"}</span>
+          <span>T+ {Math.round(replayState?.elapsedS ?? 0)} с</span>
           <span>Прокрутка x{REPLAY_SPEED_MULTIPLIER} · {replayDurationMin} мин</span>
         </div>
       </div>

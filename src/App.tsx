@@ -1,4 +1,4 @@
-import { ChangeEvent, ReactNode, useMemo, useState } from "react";
+import { ChangeEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -12,7 +12,7 @@ import {
   Settings,
   Signal,
 } from "lucide-react";
-import { FlightPreview3D } from "./FlightPreview3D";
+import { FlightPreview3D, FlightReplayState } from "./FlightPreview3D";
 import {
   DEFAULT_MATCHER_CONFIG,
   MatchPoint,
@@ -28,6 +28,7 @@ import {
 type Config = typeof DEFAULT_MATCHER_CONFIG;
 type ViewMode = "operator" | "method";
 type InputMode = "simulation" | "nmea";
+type NmeaInputState = "empty" | "dirty" | "ready" | "error";
 
 const TILE_SIZE = 256;
 const MAP_WIDTH = 980;
@@ -51,8 +52,11 @@ function formatCoord(value: number, axis: "lat" | "lon"): string {
   return `${Math.abs(value).toFixed(6)}° ${hemi}`;
 }
 
-function angleError(a: number, b: number): number {
-  return Math.abs(((a - b + 540) % 360) - 180);
+function formatDuration(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
 function formatMetric(value: number | null, digits = 0, unit = ""): string {
@@ -64,6 +68,17 @@ function statusClass(status: NavigationStatus): string {
   if (status === "FIX VALID") return "ok";
   if (status === "FIX DEGRADED" || status === "FIX AMBIGUOUS") return "warn";
   return "bad";
+}
+
+function buildCumulativeDistances(path: MatchPoint[]): number[] {
+  let total = 0;
+  return path.map((point, index) => {
+    if (index > 0) {
+      const previous = path[index - 1];
+      total += Math.hypot(point.x - previous.x, point.y - previous.y);
+    }
+    return total;
+  });
 }
 
 function Help({ text }: { text: string }) {
@@ -191,6 +206,20 @@ function NmeaImportPanel({
   onUsePx4Log: () => void;
 }) {
   const lineCount = rawText.split(/\r?\n/).filter(Boolean).length;
+  const inputState: NmeaInputState = error ? "error" : importedResult ? "ready" : lineCount > 0 ? "dirty" : "empty";
+  const stateLabel: Record<NmeaInputState, string> = {
+    empty: "ожидает журнал",
+    dirty: "журнал не рассчитан",
+    ready: "расчёт готов",
+    error: "ошибка",
+  };
+  const checksumLabel = importedResult
+    ? importedResult.nmeaQuality.checksumInvalid > 0
+      ? `ошибка ${importedResult.nmeaQuality.checksumInvalid}`
+      : importedResult.nmeaQuality.checksumMissing > 0
+        ? `нет ${importedResult.nmeaQuality.checksumMissing}`
+        : "норма"
+    : "нет расчёта";
 
   return (
     <div className="nmea-import">
@@ -200,7 +229,7 @@ function NmeaImportPanel({
         value={rawText}
         onChange={(event) => onTextChange(event.currentTarget.value)}
         spellCheck={false}
-        placeholder="$GPGGA,123519.111,,,,,,,,545.4,M,46.9,M,,*47"
+        placeholder="$GPGGA,123519.111,,,,,,,,545.4,M,46.9,M,,*7F"
       />
       <div className="nmea-import-actions">
         <label className="file-button">
@@ -213,9 +242,11 @@ function NmeaImportPanel({
       </div>
       <div className="nmea-import-state">
         <span>строк <b>{lineCount}</b></span>
-        <span>режим <b>{importedResult ? "расчёт готов" : "ожидает журнал"}</b></span>
+        <span>режим <b>{stateLabel[inputState]}</b></span>
+        <span>контрольная сумма <b>{checksumLabel}</b></span>
       </div>
       {error ? <p className="input-error">{error}</p> : null}
+      {importedResult?.nmeaQuality.warning ? <p className="input-warning">{importedResult.nmeaQuality.warning}</p> : null}
     </div>
   );
 }
@@ -255,7 +286,7 @@ function pointOnMap(point: MatchPoint, center: { x: number; y: number }, zoom: n
   };
 }
 
-function SatelliteMap({ result }: { result: TerrainMatchResult }) {
+function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; currentPoint: MatchPoint }) {
   const zoom = 8;
   const basePath = result.truthAvailable && result.truthPath.length > 1 ? result.truthPath : result.estimatedPath;
   const start = basePath[0];
@@ -288,6 +319,7 @@ function SatelliteMap({ result }: { result: TerrainMatchResult }) {
   const estimateD = buildRoutePath(result.estimatedPath, centerTile, zoom);
   const startPoint = pointOnMap(start, centerTile, zoom);
   const finishPoint = pointOnMap(finish, centerTile, zoom);
+  const currentMapPoint = pointOnMap(currentPoint, centerTile, zoom);
 
   return (
     <section className="map-shell">
@@ -330,8 +362,11 @@ function SatelliteMap({ result }: { result: TerrainMatchResult }) {
         <path d={estimateD} className="route-found-path" />
         <rect x={startPoint.x - 8} y={startPoint.y - 8} width="16" height="16" className="map-dot start" />
         <rect x={finishPoint.x - 10} y={finishPoint.y - 10} width="20" height="20" className="map-dot finish" />
+        <circle cx={currentMapPoint.x} cy={currentMapPoint.y} r="11" className="map-current-pulse" />
+        <circle cx={currentMapPoint.x} cy={currentMapPoint.y} r="6" className="map-current-dot" />
         <text x={startPoint.x + 14} y={startPoint.y - 12} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.startName : "старт оценки"}</text>
         <text x={finishPoint.x + 15} y={finishPoint.y + 5} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.finishName : "оценка"}</text>
+        <text x={currentMapPoint.x + 13} y={currentMapPoint.y - 11} className="map-label">текущая оценка</text>
         <text x="32" y={MAP_HEIGHT - 38} className="map-scale">0     25     50 км</text>
         <line x1="34" y1={MAP_HEIGHT - 25} x2="218" y2={MAP_HEIGHT - 25} className="scale-line" />
       </svg>
@@ -371,22 +406,39 @@ function StatusStrip({ result }: { result: TerrainMatchResult }) {
   );
 }
 
-function SolutionPanel({ result }: { result: TerrainMatchResult }) {
-  const finalPoint = result.estimatedPath[result.estimatedPath.length - 1];
-  const finalWgs = localPointToWgs84(finalPoint);
+function SolutionPanel({
+  result,
+  currentPoint,
+  currentDistanceM,
+  currentElapsedS,
+  currentAglM,
+}: {
+  result: TerrainMatchResult;
+  currentPoint: MatchPoint;
+  currentDistanceM: number;
+  currentElapsedS: number;
+  currentAglM: number;
+}) {
+  const currentWgs = localPointToWgs84(currentPoint);
   const confidence = result.best.confidence;
-  const estimatedDistanceM = routeLengthM(result.estimatedPath);
 
   return (
     <aside className="solution-card">
       <div className="solution-top">
-        <span>Оценка положения</span>
+        <span>Оценка положения · T+ {formatDuration(currentElapsedS)}</span>
         <strong className={statusClass(result.navigationStatus)}>{result.navigationStatus}</strong>
         <p>{result.statusReason}</p>
       </div>
       <div className="coordinates">
-        <b>{formatCoord(finalWgs.lat, "lat")}</b>
-        <b>{formatCoord(finalWgs.lon, "lon")}</b>
+        <b>{formatCoord(currentWgs.lat, "lat")}</b>
+        <b>{formatCoord(currentWgs.lon, "lon")}</b>
+      </div>
+      <div className="local-coordinates">
+        <span>Локальные координаты ЦМР</span>
+        <div>
+          <b>X {formatNumber(currentPoint.x, 0)} м</b>
+          <b>Y {formatNumber(currentPoint.y, 0)} м</b>
+        </div>
       </div>
       <div className="decision-grid">
         <div>
@@ -398,12 +450,12 @@ function SolutionPanel({ result }: { result: TerrainMatchResult }) {
           <strong>{formatNumber(result.best.azimuthDeg, 0)}°</strong>
         </div>
         <div>
-          <span>СКО профиля</span>
-          <strong>{formatMeters(result.best.rmseM)}</strong>
+          <span>РВ AGL</span>
+          <strong>{formatMeters(currentAglM)}</strong>
         </div>
         <div>
-          <span>Длина оценки</span>
-          <strong>{formatMeters(estimatedDistanceM)}</strong>
+          <span>Пройдено</span>
+          <strong>{formatMeters(currentDistanceM)}</strong>
         </div>
       </div>
       <div className="confidence">
@@ -508,8 +560,9 @@ function TerrainProfile({ result }: { result: TerrainMatchResult }) {
   );
 }
 
-function NmeaStream({ result }: { result: TerrainMatchResult }) {
-  const rows = result.nmea.slice(-10).reverse();
+function NmeaStream({ result, currentIndex }: { result: TerrainMatchResult; currentIndex: number }) {
+  const end = Math.min(result.nmea.length, Math.max(1, currentIndex + 1));
+  const rows = result.nmea.slice(Math.max(0, end - 10), end).reverse();
 
   return (
     <section className="panel nmea-panel">
@@ -518,7 +571,7 @@ function NmeaStream({ result }: { result: TerrainMatchResult }) {
           <span>Журнал NMEA</span>
           <h3>Поток радиовысотомера</h3>
         </div>
-        <strong>{result.config.sampleRateHz} Гц</strong>
+        <strong>№{end}</strong>
       </header>
       <div className="nmea-table">
         {rows.map((row, index) => (
@@ -540,13 +593,14 @@ function ValidationPanel({ result }: { result: TerrainMatchResult }) {
         <CheckCircle2 size={22} />
       </header>
       <div className="fact-list">
-        <div><Gauge size={17} /><span>corr best: <b>{result.best.correlation.toFixed(3)}</b></span></div>
-        <div><Gauge size={17} /><span>corr second: <b>{result.secondCorrelation?.toFixed(3) ?? "н/д"}</b></span></div>
-        <div><Activity size={17} /><span>margin: <b>{result.ambiguity.toFixed(3)}</b></span></div>
+        <div><Gauge size={17} /><span>corr max: <b>{result.best.correlation.toFixed(3)}</b></span></div>
+        <div><Gauge size={17} /><span>corr второй: <b>{result.secondCorrelation?.toFixed(3) ?? "н/д"}</b></span></div>
+        <div><Activity size={17} /><span>зазор: <b>{result.ambiguity.toFixed(3)}</b></span></div>
         <div><Activity size={17} /><span>СКО профиля: <b>{formatMeters(result.best.rmseM)}</b></span></div>
         <div><Clock3 size={17} /><span>расчёт: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
-        <div><Gauge size={17} /><span>confidence: <b>{result.best.confidence}%</b></span></div>
+        <div><Gauge size={17} /><span>достоверность: <b>{result.best.confidence}%</b></span></div>
         <div><AlertTriangle size={17} /><span>σ рельефа: <b>{formatMetric(result.terrainStdM, 1, "м")}</b></span></div>
+        <div><AlertTriangle size={17} /><span>КС NMEA: <b>{result.nmeaQuality.checksumInvalid > 0 ? `${result.nmeaQuality.checksumInvalid} ошибок` : "норма"}</b></span></div>
         {result.truthAvailable ? (
           <>
             <div><Activity size={17} /><span>ΔV: <b>{formatMetric(result.speedErrorMps, 1, "м/с")}</b></span></div>
@@ -569,39 +623,55 @@ function AutopilotOutputPanel({ result }: { result: TerrainMatchResult }) {
     <section className="panel autopilot-panel">
       <header>
         <div>
-          <span>AUTOPILOT OUTPUT</span>
-          <h3>Навигационная оценка</h3>
+          <span>Выход для автопилота</span>
+          <h3>Пакет оценки</h3>
         </div>
         <Signal size={22} />
       </header>
       <div className="output-grid">
         <div>
-          <span>lat</span>
+          <span>X локальный</span>
+          <b>{formatNumber(output.localXM, 0)} м</b>
+        </div>
+        <div>
+          <span>Y локальный</span>
+          <b>{formatNumber(output.localYM, 0)} м</b>
+        </div>
+        <div>
+          <span>Широта</span>
           <b>{formatCoord(output.lat, "lat")}</b>
         </div>
         <div>
-          <span>lon</span>
+          <span>Долгота</span>
           <b>{formatCoord(output.lon, "lon")}</b>
         </div>
         <div>
-          <span>ground_speed_mps</span>
-          <b>{formatNumber(output.groundSpeedMps, 1)}</b>
+          <span>Vпут</span>
+          <b>{formatNumber(output.groundSpeedMps, 1)} м/с</b>
         </div>
         <div>
-          <span>azimuth_deg</span>
-          <b>{formatNumber(output.azimuthDeg, 0)}</b>
+          <span>Азимут</span>
+          <b>{formatNumber(output.azimuthDeg, 0)}°</b>
         </div>
         <div>
-          <span>confidence</span>
-          <b>{output.confidence.toFixed(2)}</b>
+          <span>Достоверность</span>
+          <b>{formatNumber(output.confidence, 2)}</b>
         </div>
         <div>
-          <span>uncertainty_m</span>
-          <b>{output.uncertaintyM === null ? "н/д" : formatNumber(output.uncertaintyM, 0)}</b>
+          <span>Статус</span>
+          <b>{output.navigationStatus}</b>
+        </div>
+        <div>
+          <span>Неопределённость</span>
+          <b>{output.uncertaintyM === null ? "н/д" : `${formatNumber(output.uncertaintyM, 0)} м`}</b>
+        </div>
+        <div>
+          <span>КС NMEA</span>
+          <b>{result.nmeaQuality.checksumInvalid > 0 ? `ошибка ${result.nmeaQuality.checksumInvalid}` : "норма"}</b>
         </div>
         <div className="wide">
-          <span>course_correction_deg</span>
-          <b>{output.courseCorrectionDeg === null ? "not configured" : formatNumber(output.courseCorrectionDeg, 1)}</b>
+          <span>Поправка курса</span>
+          <b>{output.courseCorrectionDeg === null ? "не настроено" : `${formatNumber(output.courseCorrectionDeg, 1)}°`}</b>
         </div>
       </div>
     </section>
@@ -665,6 +735,61 @@ function MethodologyMode() {
   );
 }
 
+function NmeaAwaitingState({ rawText, error }: { rawText: string; error: string | null }) {
+  const lineCount = rawText.split(/\r?\n/).filter(Boolean).length;
+  return (
+    <section className="panel nmea-empty-panel">
+      <header>
+        <div>
+          <span>Журнал NMEA</span>
+          <h3>{error ? "Расчёт отклонён" : "Оценка не рассчитана"}</h3>
+        </div>
+        <AlertTriangle size={22} />
+      </header>
+      <div className="nmea-empty-grid">
+        <div>
+          <span>строк журнала</span>
+          <b>{lineCount}</b>
+        </div>
+        <div>
+          <span>статус</span>
+          <b>{error ? "ошибка" : lineCount > 0 ? "ожидает расчёт" : "нет входа"}</b>
+        </div>
+      </div>
+      <p>{error ?? "Вставьте или загрузите NMEA-журнал радиовысотомера и запустите расчёт. До этого координата не выдаётся."}</p>
+    </section>
+  );
+}
+
+function NoNavigationOutputPanel({ rawText, error }: { rawText: string; error: string | null }) {
+  const lineCount = rawText.split(/\r?\n/).filter(Boolean).length;
+  return (
+    <section className="panel autopilot-panel no-output-panel">
+      <header>
+        <div>
+          <span>Выход для автопилота</span>
+          <h3>Нет пакета оценки</h3>
+        </div>
+        <Signal size={22} />
+      </header>
+      <div className="output-grid">
+        <div>
+          <span>Строк NMEA</span>
+          <b>{lineCount}</b>
+        </div>
+        <div>
+          <span>Состояние</span>
+          <b>{error ? "ошибка" : "не рассчитано"}</b>
+        </div>
+        <div className="wide">
+          <span>Причина</span>
+          <b>{error ?? "эталон недоступен · координата не рассчитана"}</b>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function App() {
   const [config, setConfig] = useState<Config>(DEFAULT_MATCHER_CONFIG);
   const [mode, setMode] = useState<ViewMode>("operator");
@@ -672,9 +797,40 @@ export function App() {
   const [rawNmeaText, setRawNmeaText] = useState("");
   const [importedResult, setImportedResult] = useState<TerrainMatchResult | null>(null);
   const [nmeaError, setNmeaError] = useState<string | null>(null);
+  const [replayState, setReplayState] = useState<FlightReplayState | null>(null);
   const simulationResult = useMemo(() => runTerrainMatching(config), [config]);
-  const result = inputMode === "nmea" && importedResult ? importedResult : simulationResult;
-  const routeKm = routeLengthM(result.truthAvailable ? result.truthPath : result.estimatedPath) / 1000;
+  const result = inputMode === "nmea" ? importedResult : simulationResult;
+  const routeKm = result ? routeLengthM(result.truthAvailable ? result.truthPath : result.estimatedPath) / 1000 : 0;
+  const cumulativeEstimateDistances = useMemo(() => result ? buildCumulativeDistances(result.estimatedPath) : [], [result]);
+  const currentIndex = result
+    ? Math.min(
+      Math.max(0, replayState?.pointIndex ?? 0),
+      Math.max(0, result.estimatedPath.length - 1),
+    )
+    : 0;
+  const currentPoint = result?.estimatedPath[currentIndex] ?? null;
+  const currentElapsedS = currentPoint?.t ?? replayState?.elapsedS ?? 0;
+  const currentAglM =
+    replayState?.aglM ??
+    result?.samples[currentIndex]?.radioAltitudeM ??
+    (currentPoint && result ? result.config.baroAltitudeM - currentPoint.elevationM : 0);
+  const currentDistanceM = cumulativeEstimateDistances[currentIndex] ?? 0;
+  const handleReplayChange = useCallback((state: FlightReplayState) => {
+    setReplayState((current) => {
+      if (
+        current &&
+        current.pointIndex === state.pointIndex &&
+        Math.abs(current.aglM - state.aglM) < 0.5
+      ) {
+        return current;
+      }
+      return state;
+    });
+  }, []);
+
+  useEffect(() => {
+    setReplayState(null);
+  }, [result]);
 
   function updateConfig<K extends keyof Config>(key: K, value: Config[K]) {
     setConfig((current) => ({ ...current, [key]: value }));
@@ -684,22 +840,40 @@ export function App() {
     setConfig(DEFAULT_MATCHER_CONFIG);
     setImportedResult(null);
     setNmeaError(null);
+    setRawNmeaText("");
+  }
+
+  function handleInputModeChange(nextMode: InputMode) {
+    setInputMode(nextMode);
+    setReplayState(null);
+  }
+
+  function handleNmeaTextChange(value: string) {
+    setRawNmeaText(value);
+    setImportedResult(null);
+    setNmeaError(null);
+    setInputMode("nmea");
   }
 
   async function loadNmeaFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
-    setRawNmeaText(await file.text());
-    setNmeaError(null);
-  }
-
-  function useStandLog() {
-    setRawNmeaText(simulationResult.nmea.join("\n"));
+    const text = await file.text();
+    setRawNmeaText(text);
+    setImportedResult(null);
     setNmeaError(null);
     setInputMode("nmea");
   }
 
+  function useStandLog() {
+    const text = simulationResult.nmea.join("\n");
+    setRawNmeaText(text);
+    solveNmeaText(text);
+  }
+
   function solveNmeaText(text: string) {
+    setInputMode("nmea");
+    setImportedResult(null);
     try {
       const solved = solveFromNmea(text, {
         terrainKind: config.terrainKind,
@@ -711,7 +885,6 @@ export function App() {
       });
       setImportedResult(solved);
       setNmeaError(null);
-      setInputMode("nmea");
     } catch (error) {
       setImportedResult(null);
       setNmeaError(error instanceof Error ? error.message : "Не удалось разобрать журнал NMEA.");
@@ -723,6 +896,9 @@ export function App() {
   }
 
   async function usePx4Log() {
+    setInputMode("nmea");
+    setImportedResult(null);
+    setNmeaError(null);
     try {
       const response = await fetch(PX4_DEMO_NMEA_URL, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -732,7 +908,6 @@ export function App() {
     } catch {
       setImportedResult(null);
       setNmeaError("Не удалось загрузить PX4 пример из data/import.");
-      setInputMode("nmea");
     }
   }
 
@@ -786,7 +961,7 @@ export function App() {
               <h2>Режим входа</h2>
               <button type="button" onClick={reset} aria-label="Сбросить вводные"><RotateCcw size={16} /></button>
             </div>
-            <ModeSwitch mode={inputMode} onChange={setInputMode} />
+            <ModeSwitch mode={inputMode} onChange={handleInputModeChange} />
             {inputMode === "simulation" ? (
               <>
                 <Slider
@@ -835,7 +1010,7 @@ export function App() {
                 rawText={rawNmeaText}
                 error={nmeaError}
                 importedResult={importedResult}
-                onTextChange={setRawNmeaText}
+                onTextChange={handleNmeaTextChange}
                 onFileChange={loadNmeaFile}
                 onAnalyze={analyzeNmeaLog}
                 onUseStandLog={useStandLog}
@@ -856,40 +1031,56 @@ export function App() {
 
         <section className="center-stage">
           {mode === "operator" ? (
-            <>
-              <StatusStrip result={result} />
-              <FlightPreview3D result={result} />
-              <SatelliteMap result={result} />
-              <div className="bottom-grid">
-                <NmeaStream result={result} />
-                <TerrainProfile result={result} />
-              </div>
-            </>
+            result && currentPoint ? (
+              <>
+                <StatusStrip result={result} />
+                <FlightPreview3D result={result} replayState={replayState} onReplayChange={handleReplayChange} />
+                <SatelliteMap result={result} currentPoint={currentPoint} />
+                <div className="bottom-grid">
+                  <NmeaStream result={result} currentIndex={currentIndex} />
+                  <TerrainProfile result={result} />
+                </div>
+              </>
+            ) : (
+              <NmeaAwaitingState rawText={rawNmeaText} error={nmeaError} />
+            )
           ) : (
             <MethodologyMode />
           )}
         </section>
 
         <aside className="right-rail">
-          <SolutionPanel result={result} />
-          <AutopilotOutputPanel result={result} />
-          <ValidationPanel result={result} />
-          <AlgorithmEventLog result={result} />
-          <CorrelationSurface result={result} />
-          <section className="panel region-panel">
-            <header>
-              <div>
-                <span>Район</span>
-                <h3>{TAIGA_ROUTE.region}</h3>
-              </div>
-              <Satellite size={22} />
-            </header>
-            <p>{TAIGA_ROUTE.note}</p>
-            <div className="region-stats">
-              <span>трасса <b>{formatNumber(routeKm, 1)} км</b></span>
-              <span>река <b>{TAIGA_ROUTE.riverName}</b></span>
-            </div>
-          </section>
+          {result && currentPoint ? (
+            <>
+              <SolutionPanel
+                result={result}
+                currentPoint={currentPoint}
+                currentDistanceM={currentDistanceM}
+                currentElapsedS={currentElapsedS}
+                currentAglM={currentAglM}
+              />
+              <AutopilotOutputPanel result={result} />
+              <ValidationPanel result={result} />
+              <AlgorithmEventLog result={result} />
+              <CorrelationSurface result={result} />
+              <section className="panel region-panel">
+                <header>
+                  <div>
+                    <span>Район</span>
+                    <h3>{TAIGA_ROUTE.region}</h3>
+                  </div>
+                  <Satellite size={22} />
+                </header>
+                <p>{TAIGA_ROUTE.note}</p>
+                <div className="region-stats">
+                  <span>трасса <b>{formatNumber(routeKm, 1)} км</b></span>
+                  <span>река <b>{TAIGA_ROUTE.riverName}</b></span>
+                </div>
+              </section>
+            </>
+          ) : (
+            <NoNavigationOutputPanel rawText={rawNmeaText} error={nmeaError} />
+          )}
         </aside>
       </main>
     </div>
