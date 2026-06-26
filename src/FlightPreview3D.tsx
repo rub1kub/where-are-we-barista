@@ -426,7 +426,7 @@ function makeDrone() {
 
   const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.13, 24), darkMaterial);
   engine.rotation.x = Math.PI / 2;
-  engine.position.z = -0.64;
+  engine.position.z = 0.62;
   group.add(engine);
 
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.28, 0.12), accentMaterial);
@@ -435,7 +435,7 @@ function makeDrone() {
   group.add(fin);
 
   const prop = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.42, 0.018), darkMaterial);
-  prop.position.z = -0.75;
+  prop.position.z = 0.73;
   group.add(prop);
 
   group.scale.setScalar(0.52);
@@ -537,6 +537,7 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
     const clock = new THREE.Clock();
     let raf = 0;
     const orientationProbe = new THREE.Object3D();
+    let orientationInitialized = false;
 
     const animate = () => {
       const elapsed = clock.getElapsedTime();
@@ -562,7 +563,12 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
       orientationProbe.position.copy(base);
       orientationProbe.lookAt(ahead);
       orientationProbe.rotateZ(bank);
-      drone.quaternion.slerp(orientationProbe.quaternion, 0.14);
+      if (!orientationInitialized) {
+        drone.quaternion.copy(orientationProbe.quaternion);
+        orientationInitialized = true;
+      } else {
+        drone.quaternion.slerp(orientationProbe.quaternion, 0.14);
+      }
       prop.rotation.z += 1.28;
 
       const side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();

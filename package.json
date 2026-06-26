@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dem:generate": "node scripts/generate-dem-sample.mjs",
+    "nmea:generate-demo": "node scripts/generate-px4-nmea-demo.mjs",
     "build": "tsc --noEmit && node scripts/build.mjs",
     "test": "node scripts/test.mjs"
   },

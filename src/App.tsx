@@ -32,6 +32,7 @@ type InputMode = "simulation" | "nmea";
 const TILE_SIZE = 256;
 const MAP_WIDTH = 980;
 const MAP_HEIGHT = 560;
+const PX4_DEMO_NMEA_URL = "/examples/px4-derived-radio-altimeter.nmea";
 
 function formatNumber(value: number, digits = 0): string {
   return value.toLocaleString("ru-RU", {
@@ -178,6 +179,7 @@ function NmeaImportPanel({
   onFileChange,
   onAnalyze,
   onUseStandLog,
+  onUsePx4Log,
 }: {
   rawText: string;
   error: string | null;
@@ -186,6 +188,7 @@ function NmeaImportPanel({
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onAnalyze: () => void;
   onUseStandLog: () => void;
+  onUsePx4Log: () => void;
 }) {
   const lineCount = rawText.split(/\r?\n/).filter(Boolean).length;
 
@@ -205,6 +208,7 @@ function NmeaImportPanel({
           <input accept=".txt,.nmea,.log" type="file" onChange={onFileChange} />
         </label>
         <button type="button" onClick={onUseStandLog}>Журнал стенда</button>
+        <button type="button" onClick={onUsePx4Log}>PX4 пример</button>
         <button className="primary" type="button" onClick={onAnalyze}>Рассчитать по журналу</button>
       </div>
       <div className="nmea-import-state">
@@ -695,9 +699,9 @@ export function App() {
     setInputMode("nmea");
   }
 
-  function analyzeNmeaLog() {
+  function solveNmeaText(text: string) {
     try {
-      const solved = solveFromNmea(rawNmeaText, {
+      const solved = solveFromNmea(text, {
         terrainKind: config.terrainKind,
         baroAltitudeM: config.baroAltitudeM,
         sampleRateHz: config.sampleRateHz,
@@ -711,6 +715,24 @@ export function App() {
     } catch (error) {
       setImportedResult(null);
       setNmeaError(error instanceof Error ? error.message : "Не удалось разобрать журнал NMEA.");
+    }
+  }
+
+  function analyzeNmeaLog() {
+    solveNmeaText(rawNmeaText);
+  }
+
+  async function usePx4Log() {
+    try {
+      const response = await fetch(PX4_DEMO_NMEA_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      setRawNmeaText(text);
+      solveNmeaText(text);
+    } catch {
+      setImportedResult(null);
+      setNmeaError("Не удалось загрузить PX4 пример из data/import.");
+      setInputMode("nmea");
     }
   }
 
@@ -817,6 +839,7 @@ export function App() {
                 onFileChange={loadNmeaFile}
                 onAnalyze={analyzeNmeaLog}
                 onUseStandLog={useStandLog}
+                onUsePx4Log={usePx4Log}
               />
             )}
           </section>

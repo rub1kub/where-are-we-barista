@@ -1,10 +1,11 @@
 import * as esbuild from "esbuild";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const distDir = path.join(root, "dist");
+const examplesDir = path.join(root, "examples");
 
 export async function buildApp({ minify = true } = {}) {
   await rm(distDir, { recursive: true, force: true });
@@ -28,6 +29,7 @@ export async function buildApp({ minify = true } = {}) {
     '<link rel="stylesheet" href="./assets/app.css" />\n    <script type="module" src="./assets/app.js"></script>',
   );
   await writeFile(path.join(distDir, "index.html"), builtHtml);
+  await cp(examplesDir, path.join(distDir, "examples"), { recursive: true });
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

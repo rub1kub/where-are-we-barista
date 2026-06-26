@@ -376,7 +376,7 @@ input[type="range"] {
 
 .nmea-import-actions {
   display: grid;
-  grid-template-columns: 0.6fr 1fr 1.35fr;
+  grid-template-columns: 1fr 1fr;
   gap: 7px;
 }
 

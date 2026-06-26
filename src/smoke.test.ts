@@ -4,6 +4,7 @@ import {
   parseGgaRadioSentence,
   parseNmeaStream,
 } from "./nmeaRadioAltimeter";
+import { readFileSync } from "node:fs";
 import {
   DEFAULT_MATCHER_CONFIG,
   TAIGA_ROUTE,
@@ -73,6 +74,20 @@ function run() {
   assert(imported.events.some((event) => event.code === "BEST_CANDIDATE"), "solver should log the selected best candidate");
   assert(imported.autopilotOutput.courseCorrectionDeg === null, "course correction should be explicit when not configured");
   assert(imported.autopilotOutput.confidence > 0.7, "autopilot output should carry normalized confidence");
+
+  const px4ExternalNmea = readFileSync("examples/px4-derived-radio-altimeter.nmea", "utf8");
+  const px4Imported = solveFromNmea(px4ExternalNmea, {
+    terrainKind: DEFAULT_MATCHER_CONFIG.terrainKind,
+    baroAltitudeM: DEFAULT_MATCHER_CONFIG.baroAltitudeM,
+    sampleRateHz: DEFAULT_MATCHER_CONFIG.sampleRateHz,
+    speedMinMps: DEFAULT_MATCHER_CONFIG.speedMinMps,
+    speedMaxMps: DEFAULT_MATCHER_CONFIG.speedMaxMps,
+    speedStepMps: DEFAULT_MATCHER_CONFIG.speedStepMps,
+  });
+  assert(!px4Imported.truthAvailable, "PX4-derived external NMEA file should solve without truth");
+  assert(px4Imported.samples.length === 1690, "PX4-derived external NMEA fixture should keep every imported sentence");
+  assert(px4Imported.events.some((event) => event.code === "RA_STREAM_STARTED"), "PX4-derived import should produce algorithm events");
+  assert(px4Imported.autopilotOutput.courseCorrectionDeg === null, "PX4-derived import should not invent course correction");
 
   const flat = runTerrainMatching({
     ...DEFAULT_MATCHER_CONFIG,
