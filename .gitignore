@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+coverage/
+.DS_Store
+.playwright-mcp/
+.tmp/
+*.local
+*.tsbuildinfo
+playwright-report/
+test-results/
