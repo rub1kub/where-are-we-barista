@@ -71,7 +71,7 @@ export const TAIGA_ROUTE = {
   startName: "Ванавара",
   finishName: "лагерь",
   riverName: "Подкаменная Тунгуска",
-  demName: "SRTM 1 Arc-Second / 30 м",
+  demName: "ЦМР стенда / шаг 30 м",
   start: {
     lat: 60.3446,
     lon: 102.2797,
