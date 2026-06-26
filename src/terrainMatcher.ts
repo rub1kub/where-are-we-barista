@@ -2,6 +2,7 @@ import {
   RadioAltimeterSample,
   buildGgaRadioSentence,
   parseGgaRadioSentence,
+  parseNmeaStream,
 } from "./nmeaRadioAltimeter";
 import { COPERNICUS_TAIGA_DEM } from "./copernicusDemSample";
 
@@ -18,6 +19,44 @@ export type MatcherConfig = {
   speedMinMps: number;
   speedMaxMps: number;
   speedStepMps: number;
+};
+
+export type SolverConfig = Pick<
+  MatcherConfig,
+  "terrainKind" | "baroAltitudeM" | "sampleRateHz" | "speedMinMps" | "speedMaxMps" | "speedStepMps"
+> & {
+  shiftCandidatesM?: number[];
+};
+
+export type NavigationStatus = "FIX VALID" | "FIX DEGRADED" | "FIX AMBIGUOUS" | "LOW RELIEF" | "NO FIX";
+
+export type AlgorithmEventCode =
+  | "RA_STREAM_STARTED"
+  | "PROFILE_WINDOW_READY"
+  | "SEARCH_STARTED"
+  | "BEST_CANDIDATE"
+  | "FIX_VALID"
+  | "FIX_DEGRADED"
+  | "FIX_AMBIGUOUS"
+  | "LOW_RELIEF"
+  | "NO_FIX";
+
+export type AlgorithmEvent = {
+  code: AlgorithmEventCode;
+  elapsedMs: number;
+  message: string;
+  details?: Record<string, number | string>;
+};
+
+export type AutopilotOutput = {
+  lat: number;
+  lon: number;
+  groundSpeedMps: number;
+  azimuthDeg: number;
+  confidence: number;
+  uncertaintyM: number | null;
+  courseCorrectionDeg: number | null;
+  navigationStatus: NavigationStatus;
 };
 
 export type MatchPoint = {
@@ -50,7 +89,9 @@ export type HeatmapCell = {
 };
 
 export type TerrainMatchResult = {
-  config: MatcherConfig;
+  config: SolverConfig;
+  sourceMode: "simulation" | "imported";
+  truthAvailable: boolean;
   nmea: string[];
   samples: RadioAltimeterSample[];
   measuredProfile: number[];
@@ -59,11 +100,19 @@ export type TerrainMatchResult = {
   estimatedPath: MatchPoint[];
   heatmap: HeatmapCell[];
   best: MatchCandidate;
-  finalErrorM: number;
-  meanErrorM: number;
+  secondCorrelation: number | null;
+  finalErrorM: number | null;
+  meanErrorM: number | null;
+  speedErrorMps: number | null;
+  azimuthErrorDeg: number | null;
   terrainReliefM: number;
+  terrainStdM: number;
   ambiguity: number;
+  navigationStatus: NavigationStatus;
+  statusReason: string;
   computeMs: number;
+  events: AlgorithmEvent[];
+  autopilotOutput: AutopilotOutput;
 };
 
 export const TAIGA_ROUTE = {
@@ -256,12 +305,114 @@ function measuredRelief(profile: number[]): number {
   return Math.max(...profile) - Math.min(...profile);
 }
 
+function standardDeviation(profile: number[]): number {
+  const mean = profile.reduce((sum, value) => sum + value, 0) / Math.max(1, profile.length);
+  const variance = profile.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / Math.max(1, profile.length);
+  return Math.sqrt(variance);
+}
+
+function angleErrorDeg(a: number, b: number): number {
+  return Math.abs(((a - b + 540) % 360) - 180);
+}
+
 function estimateConfidence(correlation: number, reliefM: number, ambiguity: number, rmseM: number): number {
   const corrScore = clamp((correlation - 0.55) / 0.44, 0, 1);
   const reliefScore = clamp((reliefM - 35) / 210, 0, 1);
   const peakScore = clamp(ambiguity / 0.02, 0, 1);
   const rmseScore = clamp(1 - rmseM / 65, 0, 1);
   return Math.round((0.46 * corrScore + 0.22 * reliefScore + 0.12 * peakScore + 0.2 * rmseScore) * 100);
+}
+
+function classifyNavigationStatus(
+  confidence: number,
+  terrainReliefM: number,
+  terrainStdM: number,
+  ambiguity: number,
+  correlation: number,
+  rmseM: number,
+): { navigationStatus: NavigationStatus; statusReason: string } {
+  if (!Number.isFinite(correlation) || !Number.isFinite(rmseM)) {
+    return {
+      navigationStatus: "NO FIX",
+      statusReason: "Расчёт не дал корректного кандидата.",
+    };
+  }
+
+  if (terrainReliefM < 35 || terrainStdM < 9) {
+    return {
+      navigationStatus: "LOW RELIEF",
+      statusReason: "Рельеф недостаточно выражен: нужен более длинный участок или другой источник.",
+    };
+  }
+
+  if (confidence < 18 || correlation < 0.42 || rmseM > 180) {
+    return {
+      navigationStatus: "NO FIX",
+      statusReason: "Корреляционный пик не прошёл минимальные пороги качества.",
+    };
+  }
+
+  if (ambiguity < 0.008) {
+    return {
+      navigationStatus: "FIX AMBIGUOUS",
+      statusReason: "Несколько кандидатов близки по corr: координата требует контроля.",
+    };
+  }
+
+  if (confidence < 72 || correlation < 0.78 || rmseM > 80) {
+    return {
+      navigationStatus: "FIX DEGRADED",
+      statusReason: "Оценка построена, но качество ниже штатного порога.",
+    };
+  }
+
+  return {
+    navigationStatus: "FIX VALID",
+    statusReason: "Пик корреляции устойчивый, рельеф информативен.",
+  };
+}
+
+function statusToEventCode(status: NavigationStatus): AlgorithmEventCode {
+  if (status === "FIX VALID") return "FIX_VALID";
+  if (status === "FIX DEGRADED") return "FIX_DEGRADED";
+  if (status === "FIX AMBIGUOUS") return "FIX_AMBIGUOUS";
+  if (status === "LOW RELIEF") return "LOW_RELIEF";
+  return "NO_FIX";
+}
+
+function estimateUncertaintyM(
+  status: NavigationStatus,
+  confidence: number,
+  ambiguity: number,
+  rmseM: number,
+  terrainStdM: number,
+): number | null {
+  if (status === "NO FIX") return null;
+  const confidencePenaltyM = (100 - confidence) * 8;
+  const ambiguityPenaltyM = ambiguity > 0 ? clamp(0.018 / ambiguity, 0, 8) * 85 : 680;
+  const reliefPenaltyM = terrainStdM > 0 ? clamp(18 / terrainStdM, 0, 4) * 55 : 220;
+  return Math.round(clamp(rmseM * 2.4 + confidencePenaltyM + ambiguityPenaltyM + reliefPenaltyM, 12, 5000));
+}
+
+function buildAutopilotOutput(
+  estimatedPath: MatchPoint[],
+  best: MatchCandidate,
+  navigationStatus: NavigationStatus,
+  terrainStdM: number,
+  ambiguity: number,
+): AutopilotOutput {
+  const finalPoint = estimatedPath[estimatedPath.length - 1] ?? { x: 0, y: 0 };
+  const wgs = localPointToWgs84(finalPoint);
+  return {
+    lat: wgs.lat,
+    lon: wgs.lon,
+    groundSpeedMps: best.speedMps,
+    azimuthDeg: best.azimuthDeg,
+    confidence: best.confidence / 100,
+    uncertaintyM: estimateUncertaintyM(navigationStatus, best.confidence, ambiguity, best.rmseM, terrainStdM),
+    courseCorrectionDeg: null,
+    navigationStatus,
+  };
 }
 
 export function routeLengthM(path: MatchPoint[]): number {
@@ -272,31 +423,91 @@ export function routeLengthM(path: MatchPoint[]): number {
   return total;
 }
 
-export function runTerrainMatching(config: MatcherConfig): TerrainMatchResult {
+function normalizeSampleTimes(samples: RadioAltimeterSample[], fallbackSampleRateHz: number): number[] {
+  if (samples.length === 0) return [];
+
+  let dayOffset = 0;
+  let previous = samples[0].t;
+  const absolute = samples.map((sample, index) => {
+    if (index > 0 && sample.t + dayOffset < previous - 1) {
+      dayOffset += 86400;
+    }
+    const value = sample.t + dayOffset;
+    previous = value;
+    return value;
+  });
+  const first = absolute[0];
+  const times = absolute.map((value) => value - first);
+  const span = times[times.length - 1] ?? 0;
+
+  if (span <= 0.0001) {
+    return samples.map((_, index) => index / fallbackSampleRateHz);
+  }
+
+  return times;
+}
+
+export function solveFromMeasuredProfile({
+  config,
+  measuredProfile,
+  sampleTimesS,
+  nmea = [],
+  samples = [],
+  sourceMode = "imported",
+}: {
+  config: SolverConfig;
+  measuredProfile: number[];
+  sampleTimesS?: number[];
+  nmea?: string[];
+  samples?: RadioAltimeterSample[];
+  sourceMode?: "simulation" | "imported";
+}): TerrainMatchResult {
   const startTime = performance.now();
-  const sampleCount = Math.max(12, Math.round(config.durationS * config.sampleRateHz) + 1);
-  const dt = 1 / config.sampleRateHz;
+  const events: AlgorithmEvent[] = [];
+  const mark = (code: AlgorithmEventCode, message: string, details?: Record<string, number | string>) => {
+    events.push({
+      code,
+      elapsedMs: Math.round(performance.now() - startTime),
+      message,
+      details,
+    });
+  };
 
-  const truthPath: MatchPoint[] = Array.from({ length: sampleCount }, (_, index) =>
-    projectPoint(config.terrainKind, config.trueAzimuthDeg, config.trueSpeedMps * index * dt, index * dt),
-  );
-
-  const nmea = truthPath.map((point, index) => {
-    const radioAltitude = Math.max(25, config.baroAltitudeM - point.elevationM + deterministicNoise(index, config.radioNoiseM));
-    return buildGgaRadioSentence(point.t, radioAltitude);
+  mark("RA_STREAM_STARTED", "Принят поток радиовысотомера.", {
+    samples: measuredProfile.length,
+    mode: sourceMode,
   });
 
-  const samples = nmea.map((sentence) => parseGgaRadioSentence(sentence, config.baroAltitudeM));
-  const measuredProfile = samples.map((sample) => sample.terrainMslM);
+  if (measuredProfile.length < 12) {
+    throw new Error("Для расчёта нужен NMEA-журнал минимум из 12 измерений.");
+  }
+
+  const sampleCount = measuredProfile.length;
   const terrainReliefM = measuredRelief(measuredProfile);
+  const terrainStdM = standardDeviation(measuredProfile);
   const indexes = downsampleIndexes(sampleCount, 260);
-  const matchTimes = indexes.map((index) => truthPath[index].t);
+  const rawTimes = sampleTimesS && sampleTimesS.length === sampleCount
+    ? sampleTimesS
+    : measuredProfile.map((_, index) => index / config.sampleRateHz);
+  const matchTimes = indexes.map((index) => rawTimes[index]);
   const measuredMatchProfile = indexes.map((index) => measuredProfile[index]);
   const measuredSum = measuredMatchProfile.reduce((sum, value) => sum + value, 0);
   const measuredMean = measuredSum / Math.max(1, measuredMatchProfile.length);
   const measuredVariance =
     measuredMatchProfile.reduce((sum, value) => sum + value * value, 0) -
     (measuredSum * measuredSum) / Math.max(1, measuredMatchProfile.length);
+
+  mark("PROFILE_WINDOW_READY", "Окно профиля рельефа готово.", {
+    windowSamples: measuredMatchProfile.length,
+    terrainReliefM: Math.round(terrainReliefM),
+    terrainStdM: Math.round(terrainStdM),
+  });
+  mark("SEARCH_STARTED", "Запущен перебор азимута, скорости и смещения.", {
+    azimuthMinDeg: 0,
+    azimuthMaxDeg: 359,
+    speedMinMps: config.speedMinMps,
+    speedMaxMps: config.speedMaxMps,
+  });
 
   let bestCell: HeatmapCell = {
     azimuthDeg: 0,
@@ -307,6 +518,7 @@ export function runTerrainMatching(config: MatcherConfig): TerrainMatchResult {
   };
   let secondCorrelation = -1;
   const heatmap: HeatmapCell[] = [];
+  const shiftCandidates = config.shiftCandidatesM ?? SHIFT_CANDIDATES_M;
 
   for (let azimuthDeg = 0; azimuthDeg < 360; azimuthDeg += 1) {
     for (let speedMps = config.speedMinMps; speedMps <= config.speedMaxMps + 0.0001; speedMps += config.speedStepMps) {
@@ -318,7 +530,7 @@ export function runTerrainMatching(config: MatcherConfig): TerrainMatchResult {
         rmseM: Number.POSITIVE_INFINITY,
       };
 
-      for (const shiftM of SHIFT_CANDIDATES_M) {
+      for (const shiftM of shiftCandidates) {
         const { correlation, rmseM } = scoreProfile(
           config.terrainKind,
           matchTimes,
@@ -358,27 +570,128 @@ export function runTerrainMatching(config: MatcherConfig): TerrainMatchResult {
     ...bestCell,
     confidence,
   };
+  mark("BEST_CANDIDATE", "Найден лучший кандидат корреляционного поиска.", {
+    azimuthDeg: best.azimuthDeg,
+    speedMps: best.speedMps,
+    shiftM: best.shiftM,
+    corr: Number(best.correlation.toFixed(4)),
+    rmseM: Math.round(best.rmseM),
+  });
 
-  const estimatedPath: MatchPoint[] = truthPath.map((point) =>
-    projectPoint(config.terrainKind, best.azimuthDeg, best.shiftM + best.speedMps * point.t, point.t),
+  const { navigationStatus, statusReason } = classifyNavigationStatus(
+    confidence,
+    terrainReliefM,
+    terrainStdM,
+    ambiguity,
+    best.correlation,
+    best.rmseM,
+  );
+
+  const estimatedPath: MatchPoint[] = rawTimes.map((t) =>
+    projectPoint(config.terrainKind, best.azimuthDeg, best.shiftM + best.speedMps * t, t),
   );
   const referenceProfile = estimatedPath.map((point) => point.elevationM);
-  const errors = estimatedPath.map((point, index) => horizontalDistance(point, truthPath[index]));
+  mark(statusToEventCode(navigationStatus), statusReason, {
+    confidence,
+    ambiguity: Number(ambiguity.toFixed(4)),
+    rmseM: Math.round(best.rmseM),
+  });
+  const autopilotOutput = buildAutopilotOutput(estimatedPath, best, navigationStatus, terrainStdM, ambiguity);
 
   return {
     config,
+    sourceMode,
+    truthAvailable: false,
     nmea,
     samples,
     measuredProfile,
     referenceProfile,
-    truthPath,
+    truthPath: [],
     estimatedPath,
     heatmap,
     best,
+    secondCorrelation: secondCorrelation >= 0 ? secondCorrelation : null,
+    finalErrorM: null,
+    meanErrorM: null,
+    speedErrorMps: null,
+    azimuthErrorDeg: null,
+    terrainReliefM,
+    terrainStdM,
+    ambiguity,
+    navigationStatus,
+    statusReason,
+    computeMs: performance.now() - startTime,
+    events,
+    autopilotOutput,
+  };
+}
+
+export function solveFromNmea(text: string, config: SolverConfig): TerrainMatchResult {
+  const samples = parseNmeaStream(text, config.baroAltitudeM);
+  const nmea = samples.map((sample) => sample.sentence);
+  const measuredProfile = samples.map((sample) => sample.terrainMslM);
+  const sampleTimesS = normalizeSampleTimes(samples, config.sampleRateHz);
+
+  return solveFromMeasuredProfile({
+    config,
+    measuredProfile,
+    sampleTimesS,
+    nmea,
+    samples,
+    sourceMode: "imported",
+  });
+}
+
+export function simulateFlight(config: MatcherConfig): {
+  truthPath: MatchPoint[];
+  nmea: string[];
+  samples: RadioAltimeterSample[];
+  measuredProfile: number[];
+  sampleTimesS: number[];
+} {
+  const sampleCount = Math.max(12, Math.round(config.durationS * config.sampleRateHz) + 1);
+  const dt = 1 / config.sampleRateHz;
+
+  const truthPath: MatchPoint[] = Array.from({ length: sampleCount }, (_, index) =>
+    projectPoint(config.terrainKind, config.trueAzimuthDeg, config.trueSpeedMps * index * dt, index * dt),
+  );
+
+  const nmea = truthPath.map((point, index) => {
+    const radioAltitude = Math.max(25, config.baroAltitudeM - point.elevationM + deterministicNoise(index, config.radioNoiseM));
+    return buildGgaRadioSentence(point.t, radioAltitude);
+  });
+  const samples = nmea.map((sentence) => parseGgaRadioSentence(sentence, config.baroAltitudeM));
+  const measuredProfile = samples.map((sample) => sample.terrainMslM);
+
+  return {
+    truthPath,
+    nmea,
+    samples,
+    measuredProfile,
+    sampleTimesS: truthPath.map((point) => point.t),
+  };
+}
+
+export function runTerrainMatching(config: MatcherConfig): TerrainMatchResult {
+  const simulation = simulateFlight(config);
+  const solved = solveFromMeasuredProfile({
+    config,
+    measuredProfile: simulation.measuredProfile,
+    sampleTimesS: simulation.sampleTimesS,
+    nmea: simulation.nmea,
+    samples: simulation.samples,
+    sourceMode: "simulation",
+  });
+  const errors = solved.estimatedPath.map((point, index) => horizontalDistance(point, simulation.truthPath[index]));
+
+  return {
+    ...solved,
+    truthAvailable: true,
+    sourceMode: "simulation",
+    truthPath: simulation.truthPath,
     finalErrorM: errors[errors.length - 1] ?? 0,
     meanErrorM: errors.reduce((sum, value) => sum + value, 0) / Math.max(1, errors.length),
-    terrainReliefM,
-    ambiguity,
-    computeMs: performance.now() - startTime,
+    speedErrorMps: Math.abs(solved.best.speedMps - config.trueSpeedMps),
+    azimuthErrorDeg: angleErrorDeg(solved.best.azimuthDeg, config.trueAzimuthDeg),
   };
 }

@@ -1,4 +1,4 @@
-import { ReactNode, useMemo, useState } from "react";
+import { ChangeEvent, ReactNode, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -16,15 +16,18 @@ import { FlightPreview3D } from "./FlightPreview3D";
 import {
   DEFAULT_MATCHER_CONFIG,
   MatchPoint,
+  NavigationStatus,
   TAIGA_ROUTE,
   TerrainMatchResult,
   localPointToWgs84,
   routeLengthM,
   runTerrainMatching,
+  solveFromNmea,
 } from "./terrainMatcher";
 
 type Config = typeof DEFAULT_MATCHER_CONFIG;
 type ViewMode = "operator" | "method";
+type InputMode = "simulation" | "nmea";
 
 const TILE_SIZE = 256;
 const MAP_WIDTH = 980;
@@ -49,6 +52,17 @@ function formatCoord(value: number, axis: "lat" | "lon"): string {
 
 function angleError(a: number, b: number): number {
   return Math.abs(((a - b + 540) % 360) - 180);
+}
+
+function formatMetric(value: number | null, digits = 0, unit = ""): string {
+  if (value === null || !Number.isFinite(value)) return "н/д";
+  return `${formatNumber(value, digits)}${unit ? ` ${unit}` : ""}`;
+}
+
+function statusClass(status: NavigationStatus): string {
+  if (status === "FIX VALID") return "ok";
+  if (status === "FIX DEGRADED" || status === "FIX AMBIGUOUS") return "warn";
+  return "bad";
 }
 
 function Help({ text }: { text: string }) {
@@ -137,6 +151,71 @@ function Slider({
   );
 }
 
+function ModeSwitch({
+  mode,
+  onChange,
+}: {
+  mode: InputMode;
+  onChange: (mode: InputMode) => void;
+}) {
+  return (
+    <div className="mode-switch" role="group" aria-label="Режим входных данных">
+      <button className={mode === "simulation" ? "active" : ""} type="button" onClick={() => onChange("simulation")}>
+        Стенд
+      </button>
+      <button className={mode === "nmea" ? "active" : ""} type="button" onClick={() => onChange("nmea")}>
+        Журнал NMEA
+      </button>
+    </div>
+  );
+}
+
+function NmeaImportPanel({
+  rawText,
+  error,
+  importedResult,
+  onTextChange,
+  onFileChange,
+  onAnalyze,
+  onUseStandLog,
+}: {
+  rawText: string;
+  error: string | null;
+  importedResult: TerrainMatchResult | null;
+  onTextChange: (value: string) => void;
+  onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onAnalyze: () => void;
+  onUseStandLog: () => void;
+}) {
+  const lineCount = rawText.split(/\r?\n/).filter(Boolean).length;
+
+  return (
+    <div className="nmea-import">
+      <label htmlFor="nmea-log">Журнал радиовысотомера</label>
+      <textarea
+        id="nmea-log"
+        value={rawText}
+        onChange={(event) => onTextChange(event.currentTarget.value)}
+        spellCheck={false}
+        placeholder="$GPGGA,123519.111,,,,,,,,545.4,M,46.9,M,,*47"
+      />
+      <div className="nmea-import-actions">
+        <label className="file-button">
+          Файл
+          <input accept=".txt,.nmea,.log" type="file" onChange={onFileChange} />
+        </label>
+        <button type="button" onClick={onUseStandLog}>Журнал стенда</button>
+        <button className="primary" type="button" onClick={onAnalyze}>Рассчитать по журналу</button>
+      </div>
+      <div className="nmea-import-state">
+        <span>строк <b>{lineCount}</b></span>
+        <span>режим <b>{importedResult ? "расчёт готов" : "ожидает журнал"}</b></span>
+      </div>
+      {error ? <p className="input-error">{error}</p> : null}
+    </div>
+  );
+}
+
 function tileProject(lat: number, lon: number, zoom: number) {
   const scale = 2 ** zoom;
   const x = ((lon + 180) / 360) * scale;
@@ -174,8 +253,9 @@ function pointOnMap(point: MatchPoint, center: { x: number; y: number }, zoom: n
 
 function SatelliteMap({ result }: { result: TerrainMatchResult }) {
   const zoom = 8;
-  const start = result.truthPath[0];
-  const finish = result.truthPath[result.truthPath.length - 1];
+  const basePath = result.truthAvailable && result.truthPath.length > 1 ? result.truthPath : result.estimatedPath;
+  const start = basePath[0];
+  const finish = basePath[basePath.length - 1];
   const startWgs = localPointToWgs84(start);
   const finishWgs = localPointToWgs84(finish);
   const centerWgs = {
@@ -200,7 +280,7 @@ function SatelliteMap({ result }: { result: TerrainMatchResult }) {
     }
   }
 
-  const truthD = buildRoutePath(result.truthPath, centerTile, zoom);
+  const truthD = result.truthAvailable ? buildRoutePath(result.truthPath, centerTile, zoom) : "";
   const estimateD = buildRoutePath(result.estimatedPath, centerTile, zoom);
   const startPoint = pointOnMap(start, centerTile, zoom);
   const finishPoint = pointOnMap(finish, centerTile, zoom);
@@ -213,7 +293,7 @@ function SatelliteMap({ result }: { result: TerrainMatchResult }) {
           <h2>{TAIGA_ROUTE.routeName}</h2>
         </div>
         <div className="map-legend">
-          <span><i className="route-real" /> истинная траектория</span>
+          {result.truthAvailable ? <span><i className="route-real" /> истинная траектория</span> : null}
           <span><i className="route-found" /> оценка алгоритма</span>
         </div>
       </div>
@@ -241,13 +321,13 @@ function SatelliteMap({ result }: { result: TerrainMatchResult }) {
         ))}
         <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="rgba(3, 13, 18, 0.18)" />
         <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#mapShade)" />
-        <path d={truthD} className="route-shadow" filter="url(#routeBlur)" />
-        <path d={truthD} className="route-real-path" />
+        {result.truthAvailable ? <path d={truthD} className="route-shadow" filter="url(#routeBlur)" /> : null}
+        {result.truthAvailable ? <path d={truthD} className="route-real-path" /> : null}
         <path d={estimateD} className="route-found-path" />
         <rect x={startPoint.x - 8} y={startPoint.y - 8} width="16" height="16" className="map-dot start" />
         <rect x={finishPoint.x - 10} y={finishPoint.y - 10} width="20" height="20" className="map-dot finish" />
-        <text x={startPoint.x + 14} y={startPoint.y - 12} className="map-label">{TAIGA_ROUTE.startName}</text>
-        <text x={finishPoint.x + 15} y={finishPoint.y + 5} className="map-label">{TAIGA_ROUTE.finishName}</text>
+        <text x={startPoint.x + 14} y={startPoint.y - 12} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.startName : "старт оценки"}</text>
+        <text x={finishPoint.x + 15} y={finishPoint.y + 5} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.finishName : "оценка"}</text>
         <text x="32" y={MAP_HEIGHT - 38} className="map-scale">0     25     50 км</text>
         <line x1="34" y1={MAP_HEIGHT - 25} x2="218" y2={MAP_HEIGHT - 25} className="scale-line" />
       </svg>
@@ -265,7 +345,7 @@ function StatusStrip({ result }: { result: TerrainMatchResult }) {
     <section className="status-strip">
       <div>
         <span>Статус</span>
-        <strong>Привязка есть</strong>
+        <strong className={statusClass(result.navigationStatus)}>{result.navigationStatus}</strong>
       </div>
       <div>
         <span>ГНСС</span>
@@ -291,13 +371,14 @@ function SolutionPanel({ result }: { result: TerrainMatchResult }) {
   const finalPoint = result.estimatedPath[result.estimatedPath.length - 1];
   const finalWgs = localPointToWgs84(finalPoint);
   const confidence = result.best.confidence;
-  const status = confidence >= 80 ? "ПРИВЯЗКА ПОДТВЕРЖДЕНА" : confidence >= 55 ? "ТРЕБУЕТ КОНТРОЛЯ" : "РЕЛЬЕФ НЕДОСТАТОЧЕН";
+  const estimatedDistanceM = routeLengthM(result.estimatedPath);
 
   return (
     <aside className="solution-card">
       <div className="solution-top">
         <span>Оценка положения</span>
-        <strong>{status}</strong>
+        <strong className={statusClass(result.navigationStatus)}>{result.navigationStatus}</strong>
+        <p>{result.statusReason}</p>
       </div>
       <div className="coordinates">
         <b>{formatCoord(finalWgs.lat, "lat")}</b>
@@ -317,8 +398,8 @@ function SolutionPanel({ result }: { result: TerrainMatchResult }) {
           <strong>{formatMeters(result.best.rmseM)}</strong>
         </div>
         <div>
-          <span>Длина трассы</span>
-          <strong>{formatMeters(routeLengthM(result.truthPath))}</strong>
+          <span>Длина оценки</span>
+          <strong>{formatMeters(estimatedDistanceM)}</strong>
         </div>
       </div>
       <div className="confidence">
@@ -444,7 +525,7 @@ function NmeaStream({ result }: { result: TerrainMatchResult }) {
   );
 }
 
-function ValidationPanel({ result, finalErrorDeg }: { result: TerrainMatchResult; finalErrorDeg: number }) {
+function ValidationPanel({ result }: { result: TerrainMatchResult }) {
   return (
     <section className="panel facts-panel">
       <header>
@@ -455,10 +536,91 @@ function ValidationPanel({ result, finalErrorDeg }: { result: TerrainMatchResult
         <CheckCircle2 size={22} />
       </header>
       <div className="fact-list">
-        <div><Gauge size={17} /><span>corr: <b>{result.best.correlation.toFixed(3)}</b></span></div>
-        <div><Activity size={17} /><span>Δaz: <b>{formatNumber(finalErrorDeg, 0)}°</b></span></div>
+        <div><Gauge size={17} /><span>corr best: <b>{result.best.correlation.toFixed(3)}</b></span></div>
+        <div><Gauge size={17} /><span>corr second: <b>{result.secondCorrelation?.toFixed(3) ?? "н/д"}</b></span></div>
+        <div><Activity size={17} /><span>margin: <b>{result.ambiguity.toFixed(3)}</b></span></div>
+        <div><Activity size={17} /><span>СКО профиля: <b>{formatMeters(result.best.rmseM)}</b></span></div>
         <div><Clock3 size={17} /><span>расчёт: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
-        <div><AlertTriangle size={17} /><span>защита плоского рельефа: снижает доверие</span></div>
+        <div><Gauge size={17} /><span>confidence: <b>{result.best.confidence}%</b></span></div>
+        <div><AlertTriangle size={17} /><span>σ рельефа: <b>{formatMetric(result.terrainStdM, 1, "м")}</b></span></div>
+        {result.truthAvailable ? (
+          <>
+            <div><Activity size={17} /><span>ΔV: <b>{formatMetric(result.speedErrorMps, 1, "м/с")}</b></span></div>
+            <div><Activity size={17} /><span>Δaz: <b>{formatMetric(result.azimuthErrorDeg, 0, "°")}</b></span></div>
+            <div><MapPinned size={17} /><span>ошибка финал: <b>{formatMetric(result.finalErrorM, 0, "м")}</b></span></div>
+            <div><MapPinned size={17} /><span>ошибка средняя: <b>{formatMetric(result.meanErrorM, 0, "м")}</b></span></div>
+          </>
+        ) : (
+          <div><AlertTriangle size={17} /><span>truth unavailable: <b>эталон не приложен</b></span></div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AutopilotOutputPanel({ result }: { result: TerrainMatchResult }) {
+  const output = result.autopilotOutput;
+
+  return (
+    <section className="panel autopilot-panel">
+      <header>
+        <div>
+          <span>AUTOPILOT OUTPUT</span>
+          <h3>Навигационная оценка</h3>
+        </div>
+        <Signal size={22} />
+      </header>
+      <div className="output-grid">
+        <div>
+          <span>lat</span>
+          <b>{formatCoord(output.lat, "lat")}</b>
+        </div>
+        <div>
+          <span>lon</span>
+          <b>{formatCoord(output.lon, "lon")}</b>
+        </div>
+        <div>
+          <span>ground_speed_mps</span>
+          <b>{formatNumber(output.groundSpeedMps, 1)}</b>
+        </div>
+        <div>
+          <span>azimuth_deg</span>
+          <b>{formatNumber(output.azimuthDeg, 0)}</b>
+        </div>
+        <div>
+          <span>confidence</span>
+          <b>{output.confidence.toFixed(2)}</b>
+        </div>
+        <div>
+          <span>uncertainty_m</span>
+          <b>{output.uncertaintyM === null ? "н/д" : formatNumber(output.uncertaintyM, 0)}</b>
+        </div>
+        <div className="wide">
+          <span>course_correction_deg</span>
+          <b>{output.courseCorrectionDeg === null ? "not configured" : formatNumber(output.courseCorrectionDeg, 1)}</b>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AlgorithmEventLog({ result }: { result: TerrainMatchResult }) {
+  return (
+    <section className="panel event-panel">
+      <header>
+        <div>
+          <span>События алгоритма</span>
+          <h3>Трасса расчёта</h3>
+        </div>
+        <Activity size={22} />
+      </header>
+      <div className="event-log">
+        {result.events.map((event) => (
+          <div key={`${event.code}-${event.elapsedMs}`}>
+            <code>{event.code}</code>
+            <span>{event.elapsedMs} мс</span>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -487,6 +649,14 @@ function MethodologyMode() {
         <strong>4. Корреляция</strong>
         <span>Система перебирает азимут 0-359° и скорость, затем ищет максимум corr.</span>
       </article>
+      <article>
+        <strong>5. Данные стенда</strong>
+        <span>ЦМР взята из сэмпла Copernicus GLO-30, спутниковая подложка — ArcGIS World Imagery, NMEA можно заменить внешним журналом.</span>
+      </article>
+      <article>
+        <strong>6. 3D-реконструкция</strong>
+        <span>Превью не управляет расчётом: оно показывает текущую найденную траекторию, скорость и AGL из результата matcher-а.</span>
+      </article>
     </section>
   );
 }
@@ -494,9 +664,13 @@ function MethodologyMode() {
 export function App() {
   const [config, setConfig] = useState<Config>(DEFAULT_MATCHER_CONFIG);
   const [mode, setMode] = useState<ViewMode>("operator");
-  const result = useMemo(() => runTerrainMatching(config), [config]);
-  const routeKm = routeLengthM(result.truthPath) / 1000;
-  const finalErrorDeg = angleError(result.best.azimuthDeg, config.trueAzimuthDeg);
+  const [inputMode, setInputMode] = useState<InputMode>("simulation");
+  const [rawNmeaText, setRawNmeaText] = useState("");
+  const [importedResult, setImportedResult] = useState<TerrainMatchResult | null>(null);
+  const [nmeaError, setNmeaError] = useState<string | null>(null);
+  const simulationResult = useMemo(() => runTerrainMatching(config), [config]);
+  const result = inputMode === "nmea" && importedResult ? importedResult : simulationResult;
+  const routeKm = routeLengthM(result.truthAvailable ? result.truthPath : result.estimatedPath) / 1000;
 
   function updateConfig<K extends keyof Config>(key: K, value: Config[K]) {
     setConfig((current) => ({ ...current, [key]: value }));
@@ -504,6 +678,40 @@ export function App() {
 
   function reset() {
     setConfig(DEFAULT_MATCHER_CONFIG);
+    setImportedResult(null);
+    setNmeaError(null);
+  }
+
+  async function loadNmeaFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    setRawNmeaText(await file.text());
+    setNmeaError(null);
+  }
+
+  function useStandLog() {
+    setRawNmeaText(simulationResult.nmea.join("\n"));
+    setNmeaError(null);
+    setInputMode("nmea");
+  }
+
+  function analyzeNmeaLog() {
+    try {
+      const solved = solveFromNmea(rawNmeaText, {
+        terrainKind: config.terrainKind,
+        baroAltitudeM: config.baroAltitudeM,
+        sampleRateHz: config.sampleRateHz,
+        speedMinMps: config.speedMinMps,
+        speedMaxMps: config.speedMaxMps,
+        speedStepMps: config.speedStepMps,
+      });
+      setImportedResult(solved);
+      setNmeaError(null);
+      setInputMode("nmea");
+    } catch (error) {
+      setImportedResult(null);
+      setNmeaError(error instanceof Error ? error.message : "Не удалось разобрать журнал NMEA.");
+    }
   }
 
   return (
@@ -553,49 +761,64 @@ export function App() {
 
           <section className="rail-panel">
             <div className="rail-title">
-              <h2>Параметры симуляции</h2>
+              <h2>Режим входа</h2>
               <button type="button" onClick={reset} aria-label="Сбросить вводные"><RotateCcw size={16} /></button>
             </div>
-            <Slider
-              label="Vпут"
-              value={config.trueSpeedMps}
-              min={35}
-              max={65}
-              step={1}
-              unit="м/с"
-              help="Стендовая скорость. Алгоритм восстанавливает её по максимуму корреляции."
-              onChange={(value) => updateConfig("trueSpeedMps", value)}
-            />
-            <Slider
-              label="Азимут"
-              value={config.trueAzimuthDeg}
-              min={0}
-              max={359}
-              step={1}
-              unit="°"
-              help="Путевой угол: 0° — север, 90° — восток."
-              onChange={(value) => updateConfig("trueAzimuthDeg", value)}
-            />
-            <Slider
-              label="Окно"
-              value={config.durationS}
-              min={1200}
-              max={5400}
-              step={300}
-              unit="с"
-              help="Длительность участка корреляции."
-              onChange={(value) => updateConfig("durationS", value)}
-            />
-            <Slider
-              label="Шум РВ"
-              value={config.radioNoiseM}
-              min={0}
-              max={12}
-              step={1}
-              unit="м"
-              help="Шум радиовысотомера в метрах."
-              onChange={(value) => updateConfig("radioNoiseM", value)}
-            />
+            <ModeSwitch mode={inputMode} onChange={setInputMode} />
+            {inputMode === "simulation" ? (
+              <>
+                <Slider
+                  label="Vпут"
+                  value={config.trueSpeedMps}
+                  min={35}
+                  max={65}
+                  step={1}
+                  unit="м/с"
+                  help="Параметр стенда. Итоговая Vпут справа — результат перебора алгоритма."
+                  onChange={(value) => updateConfig("trueSpeedMps", value)}
+                />
+                <Slider
+                  label="Азимут"
+                  value={config.trueAzimuthDeg}
+                  min={0}
+                  max={359}
+                  step={1}
+                  unit="°"
+                  help="Параметр стенда. Итоговый азимут справа — найденный максимум corr."
+                  onChange={(value) => updateConfig("trueAzimuthDeg", value)}
+                />
+                <Slider
+                  label="Окно"
+                  value={config.durationS}
+                  min={1200}
+                  max={5400}
+                  step={300}
+                  unit="с"
+                  help="Длительность участка корреляции."
+                  onChange={(value) => updateConfig("durationS", value)}
+                />
+                <Slider
+                  label="Шум РВ"
+                  value={config.radioNoiseM}
+                  min={0}
+                  max={12}
+                  step={1}
+                  unit="м"
+                  help="Шум радиовысотомера в метрах."
+                  onChange={(value) => updateConfig("radioNoiseM", value)}
+                />
+              </>
+            ) : (
+              <NmeaImportPanel
+                rawText={rawNmeaText}
+                error={nmeaError}
+                importedResult={importedResult}
+                onTextChange={setRawNmeaText}
+                onFileChange={loadNmeaFile}
+                onAnalyze={analyzeNmeaLog}
+                onUseStandLog={useStandLog}
+              />
+            )}
           </section>
 
           <section className="rail-panel">
@@ -626,7 +849,9 @@ export function App() {
 
         <aside className="right-rail">
           <SolutionPanel result={result} />
-          <ValidationPanel result={result} finalErrorDeg={finalErrorDeg} />
+          <AutopilotOutputPanel result={result} />
+          <ValidationPanel result={result} />
+          <AlgorithmEventLog result={result} />
           <CorrelationSurface result={result} />
           <section className="panel region-panel">
             <header>

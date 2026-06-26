@@ -424,9 +424,9 @@ function makeDrone() {
   tailWing.position.y = 0.025;
   group.add(tailWing);
 
-  const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.14, 24), darkMaterial);
+  const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.13, 24), darkMaterial);
   engine.rotation.x = Math.PI / 2;
-  engine.position.z = 0.6;
+  engine.position.z = -0.64;
   group.add(engine);
 
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.28, 0.12), accentMaterial);
@@ -435,7 +435,7 @@ function makeDrone() {
   group.add(fin);
 
   const prop = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.42, 0.018), darkMaterial);
-  prop.position.z = 0.71;
+  prop.position.z = -0.75;
   group.add(prop);
 
   group.scale.setScalar(0.52);
@@ -448,6 +448,8 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const primaryPath = result.truthAvailable && result.truthPath.length > 1 ? result.truthPath : result.estimatedPath;
+    if (primaryPath.length < 2) return;
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -493,17 +495,19 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
         // Сеть для тайлов может отсутствовать на защите; fallback уже установлен.
       });
 
-    const truthRoute = buildReplayRoute(result.truthPath);
+    const truthRoute = buildReplayRoute(primaryPath);
     const estimateRoute = buildReplayRoute(result.estimatedPath);
     const replayCurve = new THREE.CatmullRomCurve3(truthRoute, false, "centripetal", 0.42);
     const routeGroundMaxY = Math.max(...truthRoute.map((point) => point.y));
-    const replayRealDurationS = routeLengthM(result.truthPath) / Math.max(1, result.best.speedMps);
+    const replayRealDurationS = routeLengthM(primaryPath) / Math.max(1, result.best.speedMps);
     const cruiseY =
       routeGroundMaxY +
       clamp(((result.config.baroAltitudeM - COPERNICUS_TAIGA_DEM.minElevationM) / 1000) * 0.72, 0.95, 1.55);
     scene.add(makeRouteRibbon(truthRoute));
     scene.add(makeRouteTube(truthRoute, 0x47d7ff, 0.012, 0.82));
-    scene.add(makeRouteTube(estimateRoute, 0x7cff9e, 0.01, 0.58));
+    if (result.truthAvailable) {
+      scene.add(makeRouteTube(estimateRoute, 0x7cff9e, 0.01, 0.58));
+    }
 
     const startMarker = new THREE.Mesh(
       new THREE.RingGeometry(0.11, 0.16, 24),
@@ -532,6 +536,7 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
 
     const clock = new THREE.Clock();
     let raf = 0;
+    const orientationProbe = new THREE.Object3D();
 
     const animate = () => {
       const elapsed = clock.getElapsedTime();
@@ -554,8 +559,10 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
       const ahead = new THREE.Vector3(aheadGround.x, cruiseY, aheadGround.z);
 
       drone.position.copy(base);
-      drone.lookAt(ahead);
-      drone.rotateZ(bank);
+      orientationProbe.position.copy(base);
+      orientationProbe.lookAt(ahead);
+      orientationProbe.rotateZ(bank);
+      drone.quaternion.slerp(orientationProbe.quaternion, 0.14);
       prop.rotation.z += 1.28;
 
       const side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
@@ -588,9 +595,11 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
     };
   }, [result]);
 
-  const last = result.truthPath[result.truthPath.length - 1];
-  const agl = result.config.baroAltitudeM - last.elevationM;
-  const replayDurationMin = Math.round(routeLengthM(result.truthPath) / Math.max(1, result.best.speedMps) / 60);
+  const primaryPath = result.truthAvailable && result.truthPath.length > 1 ? result.truthPath : result.estimatedPath;
+  const last = primaryPath[primaryPath.length - 1];
+  const lastSample = result.samples[result.samples.length - 1];
+  const agl = lastSample ? lastSample.radioAltitudeM : result.config.baroAltitudeM - last.elevationM;
+  const replayDurationMin = Math.round(routeLengthM(primaryPath) / Math.max(1, result.best.speedMps) / 60);
 
   return (
     <section className="panel flight3d-panel">
@@ -607,6 +616,7 @@ export function FlightPreview3D({ result }: FlightPreview3DProps) {
           <span>БАРО MSL {Math.round(result.config.baroAltitudeM)} м</span>
           <span>РВ AGL {Math.round(agl)} м</span>
           <span>Vпут {result.best.speedMps.toFixed(1)} м/с</span>
+          <span>Источник {result.truthAvailable ? "стенд" : "NMEA"}</span>
           <span>Прокрутка x{REPLAY_SPEED_MULTIPLIER} · {replayDurationMin} мин</span>
         </div>
       </div>

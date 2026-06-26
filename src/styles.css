@@ -22,7 +22,8 @@ body,
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -307,6 +308,114 @@ input[type="range"] {
   accent-color: #2dd4bf;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin: 12px 0 8px;
+}
+
+.mode-switch button,
+.nmea-import-actions button,
+.file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid rgba(133, 160, 166, 0.22);
+  border-radius: 0;
+  background: rgba(6, 14, 20, 0.82);
+  color: #dfeceb;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.12;
+  padding: 0 8px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.mode-switch button.active,
+.nmea-import-actions button.primary {
+  border-color: rgba(156, 247, 207, 0.72);
+  background: rgba(45, 212, 191, 0.16);
+  color: #effffb;
+}
+
+.nmea-import {
+  display: grid;
+  gap: 9px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(133, 160, 166, 0.12);
+}
+
+.nmea-import label {
+  color: #a8b8bb;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.nmea-import textarea {
+  width: 100%;
+  min-height: 154px;
+  resize: vertical;
+  padding: 10px;
+  border: 1px solid rgba(119, 151, 158, 0.24);
+  border-radius: 0;
+  background: rgba(4, 11, 17, 0.72);
+  color: #dffefa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  outline: none;
+}
+
+.nmea-import textarea:focus {
+  border-color: rgba(156, 247, 207, 0.66);
+}
+
+.nmea-import-actions {
+  display: grid;
+  grid-template-columns: 0.6fr 1fr 1.35fr;
+  gap: 7px;
+}
+
+.file-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nmea-import-state {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.nmea-import-state span {
+  padding: 8px;
+  border: 1px solid rgba(133, 160, 166, 0.12);
+  color: #9fafb2;
+  background: rgba(4, 11, 17, 0.48);
+  font-size: 11px;
+}
+
+.nmea-import-state b {
+  color: #f5fffd;
+}
+
+.input-error {
+  margin: 0;
+  padding: 9px;
+  border: 1px solid rgba(255, 138, 122, 0.35);
+  color: #ffb4a8;
+  background: rgba(120, 22, 18, 0.16);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -366,8 +475,22 @@ input[type="range"] {
   text-transform: uppercase;
 }
 
+.status-strip strong.ok,
+.solution-top strong.ok {
+  color: #9cf7cf;
+}
+
+.status-strip strong.warn,
+.solution-top strong.warn {
+  color: #ffcf66;
+}
+
 .status-strip strong.bad {
   color: #ffb454;
+}
+
+.solution-top strong.bad {
+  color: #ff8a7a;
 }
 
 .map-shell {
@@ -578,12 +701,76 @@ input[type="range"] {
   stroke: #74f59b;
 }
 
-.right-rail {
-  grid-template-rows: auto auto auto auto;
-}
-
 .solution-card {
   padding: 15px;
+}
+
+.output-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.output-grid div,
+.event-log div {
+  min-width: 0;
+  border: 1px solid rgba(133, 160, 166, 0.13);
+  border-radius: 0;
+  background: rgba(4, 11, 17, 0.48);
+}
+
+.output-grid div {
+  padding: 8px;
+}
+
+.output-grid div.wide {
+  grid-column: 1 / -1;
+}
+
+.output-grid span {
+  display: block;
+  color: #91a4a8;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.output-grid b {
+  display: block;
+  margin-top: 5px;
+  color: #f4fffc;
+  font-size: 14px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.event-log {
+  display: grid;
+  gap: 6px;
+}
+
+.event-log div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+}
+
+.event-log code {
+  color: #8ef5c7;
+  font-size: 11px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-log span {
+  color: #a6b8bb;
+  font-size: 11px;
+  text-align: right;
 }
 
 .solution-top strong {
@@ -592,6 +779,13 @@ input[type="range"] {
   color: #9cf7cf;
   font-size: 27px;
   line-height: 1.02;
+}
+
+.solution-top p {
+  margin: 9px 0 0;
+  color: #aebfc1;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .coordinates {
