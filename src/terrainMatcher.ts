@@ -15,6 +15,8 @@ export type MatcherConfig = {
   durationS: number;
   trueSpeedMps: number;
   trueAzimuthDeg: number;
+  plannedAzimuthDeg: number;
+  courseLookaheadM: number;
   radioNoiseM: number;
   speedMinMps: number;
   speedMaxMps: number;
@@ -23,9 +25,16 @@ export type MatcherConfig = {
 
 export type SolverConfig = Pick<
   MatcherConfig,
-  "terrainKind" | "baroAltitudeM" | "sampleRateHz" | "speedMinMps" | "speedMaxMps" | "speedStepMps"
+  | "terrainKind"
+  | "baroAltitudeM"
+  | "sampleRateHz"
+  | "speedMinMps"
+  | "speedMaxMps"
+  | "speedStepMps"
 > & {
   shiftCandidatesM?: number[];
+  plannedAzimuthDeg?: number;
+  courseLookaheadM?: number;
 };
 
 export type NavigationStatus = "FIX VALID" | "FIX DEGRADED" | "FIX AMBIGUOUS" | "LOW RELIEF" | "NO FIX";
@@ -149,6 +158,8 @@ export const DEFAULT_MATCHER_CONFIG: MatcherConfig = {
   durationS: 4200,
   trueSpeedMps: 44,
   trueAzimuthDeg: 73,
+  plannedAzimuthDeg: 73,
+  courseLookaheadM: 2500,
   radioNoiseM: 3,
   speedMinMps: 35,
   speedMaxMps: 65,
@@ -161,6 +172,18 @@ function clamp(value: number, min: number, max: number): number {
 
 function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
+}
+
+function radToDeg(rad: number): number {
+  return (rad * 180) / Math.PI;
+}
+
+function normalizeDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360;
+}
+
+function signedAngleDeltaDeg(targetDeg: number, currentDeg: number): number {
+  return ((targetDeg - currentDeg + 540) % 360) - 180;
 }
 
 function deterministicNoise(index: number, amplitudeM: number): number {
@@ -405,12 +428,48 @@ function estimateUncertaintyM(
   return Math.round(clamp(rmseM * 2.4 + confidencePenaltyM + ambiguityPenaltyM + reliefPenaltyM, 12, 5000));
 }
 
+function estimateCourseCorrectionDeg(
+  estimatedPath: MatchPoint[],
+  currentAzimuthDeg: number,
+  navigationStatus: NavigationStatus,
+  config: SolverConfig,
+): number | null {
+  if (navigationStatus !== "FIX VALID" && navigationStatus !== "FIX DEGRADED") return null;
+  if (config.plannedAzimuthDeg === undefined) return null;
+
+  const currentPoint = estimatedPath[estimatedPath.length - 1];
+  if (!currentPoint) return null;
+
+  const plannedAzimuthDeg = normalizeDeg(config.plannedAzimuthDeg);
+  const plannedAzimuth = degToRad(plannedAzimuthDeg);
+  const routeUnit = {
+    x: Math.sin(plannedAzimuth),
+    y: Math.cos(plannedAzimuth),
+  };
+  const progressM = currentPoint.x * routeUnit.x + currentPoint.y * routeUnit.y;
+  const lookaheadM = Math.max(250, config.courseLookaheadM ?? 2500);
+  const target = {
+    x: routeUnit.x * (Math.max(0, progressM) + lookaheadM),
+    y: routeUnit.y * (Math.max(0, progressM) + lookaheadM),
+  };
+  const toTarget = {
+    x: target.x - currentPoint.x,
+    y: target.y - currentPoint.y,
+  };
+  const desiredAzimuthDeg = normalizeDeg(radToDeg(Math.atan2(toTarget.x, toTarget.y)));
+  const correctionDeg = signedAngleDeltaDeg(desiredAzimuthDeg, currentAzimuthDeg);
+  const roundedCorrectionDeg = Math.round(correctionDeg * 10) / 10;
+
+  return Math.abs(roundedCorrectionDeg) < 0.05 ? 0 : roundedCorrectionDeg;
+}
+
 function buildAutopilotOutput(
   estimatedPath: MatchPoint[],
   best: MatchCandidate,
   navigationStatus: NavigationStatus,
   terrainStdM: number,
   ambiguity: number,
+  config: SolverConfig,
 ): AutopilotOutput {
   const finalPoint = estimatedPath[estimatedPath.length - 1] ?? { x: 0, y: 0 };
   const wgs = localPointToWgs84(finalPoint);
@@ -423,7 +482,7 @@ function buildAutopilotOutput(
     azimuthDeg: best.azimuthDeg,
     confidence: best.confidence / 100,
     uncertaintyM: estimateUncertaintyM(navigationStatus, best.confidence, ambiguity, best.rmseM, terrainStdM),
-    courseCorrectionDeg: null,
+    courseCorrectionDeg: estimateCourseCorrectionDeg(estimatedPath, best.azimuthDeg, navigationStatus, config),
     navigationStatus,
   };
 }
@@ -639,7 +698,7 @@ export function solveFromMeasuredProfile({
     ambiguity: Number(ambiguity.toFixed(4)),
     rmseM: Math.round(best.rmseM),
   });
-  const autopilotOutput = buildAutopilotOutput(estimatedPath, best, navigationStatus, terrainStdM, ambiguity);
+  const autopilotOutput = buildAutopilotOutput(estimatedPath, best, navigationStatus, terrainStdM, ambiguity, config);
 
   return {
     config,

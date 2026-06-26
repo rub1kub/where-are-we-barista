@@ -13,6 +13,7 @@ import {
   Signal,
 } from "lucide-react";
 import { FlightPreview3D, FlightReplayState } from "./FlightPreview3D";
+import { COPERNICUS_TAIGA_DEM } from "./copernicusDemSample";
 import {
   DEFAULT_MATCHER_CONFIG,
   MatchPoint,
@@ -50,6 +51,12 @@ function formatMeters(value: number): string {
 function formatCoord(value: number, axis: "lat" | "lon"): string {
   const hemi = axis === "lat" ? (value >= 0 ? "N" : "S") : value >= 0 ? "E" : "W";
   return `${Math.abs(value).toFixed(6)}° ${hemi}`;
+}
+
+function formatIsoDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("ru-RU");
 }
 
 function formatDuration(seconds: number): string {
@@ -671,7 +678,7 @@ function AutopilotOutputPanel({ result }: { result: TerrainMatchResult }) {
         </div>
         <div className="wide">
           <span>Поправка курса</span>
-          <b>{output.courseCorrectionDeg === null ? "не настроено" : `${formatNumber(output.courseCorrectionDeg, 1)}°`}</b>
+          <b>{output.courseCorrectionDeg === null ? "н/д" : `${formatNumber(output.courseCorrectionDeg, 1)}°`}</b>
         </div>
       </div>
     </section>
@@ -730,6 +737,10 @@ function MethodologyMode() {
       <article>
         <strong>6. 3D-реконструкция</strong>
         <span>Превью не управляет расчётом: оно показывает текущую найденную траекторию, скорость и AGL из результата matcher-а.</span>
+      </article>
+      <article>
+        <strong>7. Поправка курса</strong>
+        <span>Если статус надёжен, КРОТ сравнивает оценённый азимут с плановой линией маршрута и выдаёт рекомендательную поправку курса.</span>
       </article>
     </section>
   );
@@ -882,6 +893,8 @@ export function App() {
         speedMinMps: config.speedMinMps,
         speedMaxMps: config.speedMaxMps,
         speedStepMps: config.speedStepMps,
+        plannedAzimuthDeg: config.plannedAzimuthDeg,
+        courseLookaheadM: config.courseLookaheadM,
       });
       setImportedResult(solved);
       setNmeaError(null);
@@ -953,6 +966,11 @@ export function App() {
               label="Диапазон Vпут"
               value={`${config.speedMinMps}-${config.speedMaxMps} м/с`}
               help="Диапазон перебора путевой скорости."
+            />
+            <InputRow
+              label="План курса"
+              value={`${formatNumber(config.plannedAzimuthDeg, 0)}° · ${formatMeters(config.courseLookaheadM)}`}
+              help="Плановая линия маршрута для расчёта рекомендательной поправки курса."
             />
           </section>
 
@@ -1075,6 +1093,13 @@ export function App() {
                 <div className="region-stats">
                   <span>трасса <b>{formatNumber(routeKm, 1)} км</b></span>
                   <span>река <b>{TAIGA_ROUTE.riverName}</b></span>
+                </div>
+                <div className="dem-provenance">
+                  <span>ЦМР</span>
+                  <b>{COPERNICUS_TAIGA_DEM.sourceName}</b>
+                  <small>
+                    {COPERNICUS_TAIGA_DEM.width}x{COPERNICUS_TAIGA_DEM.height} · {COPERNICUS_TAIGA_DEM.bounds.latMin.toFixed(2)}-{COPERNICUS_TAIGA_DEM.bounds.latMax.toFixed(2)} N · {COPERNICUS_TAIGA_DEM.bounds.lonMin.toFixed(2)}-{COPERNICUS_TAIGA_DEM.bounds.lonMax.toFixed(2)} E · {formatIsoDate(COPERNICUS_TAIGA_DEM.generatedAt)}
+                  </small>
                 </div>
               </section>
             </>

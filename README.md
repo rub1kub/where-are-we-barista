@@ -149,6 +149,7 @@ flowchart TB
 | Самооценка точности | выполнено | `estimateConfidence`, `navigationStatus` |
 | Статусы `LOW RELIEF` / `NO FIX` | выполнено | `classifyNavigationStatus` |
 | Структурированный выход | выполнено | `AutopilotOutputPanel`, `buildAutopilotOutput` |
+| Рекомендательная поправка курса | выполнено | `course_correction_deg` при заданном плане и надёжном статусе |
 
 ## Практическая интеграция
 
@@ -181,7 +182,7 @@ MVP уже формирует выход:
 | `confidence` | нормированная достоверность |
 | `uncertainty_m` | оценка неопределённости, если статус позволяет |
 | `navigation_status` | `FIX VALID`, `FIX DEGRADED`, `FIX AMBIGUOUS`, `LOW RELIEF`, `NO FIX` |
-| `course_correction_deg` | `null` в MVP, поправка курса не выдумывается |
+| `course_correction_deg` | рекомендательная поправка к плановой линии маршрута; `null`, если статус не позволяет выдавать совет |
 
 Подробная схема переноса MVP на борт описана в [`docs/onboard_integration.md`](docs/onboard_integration.md).
 
@@ -216,6 +217,7 @@ http://127.0.0.1:5173/
 ```bash
 npm test
 npm run build
+npm run nmea:analyze -- examples/px4-derived-radio-altimeter.nmea
 ```
 
 ## DEM-данные
@@ -228,6 +230,8 @@ npm run dem:generate
 
 Команда требует сеть и перегенерирует `src/copernicusDemSample.ts`. В обычном запуске стенд использует уже сохранённый локальный DEM-сэмпл.
 
+Источник ЦМР также виден в интерфейсе: название набора, размер сетки, границы района и дата генерации показываются в панели района. Это нужно, чтобы на защите было понятно, что карта высот не нарисована вручную.
+
 ## Проверки
 
 Smoke-тесты проверяют:
@@ -236,6 +240,7 @@ Smoke-тесты проверяют:
 - контрольную сумму NMEA;
 - геопривязку маршрута в районе Ванавары;
 - локальные координаты `X/Y` в выходе solver-а;
+- рекомендательную поправку курса при заданной плановой линии;
 - восстановление азимута и скорости;
 - построение heatmap/corr;
 - снижение доверия на плоском шумном рельефе;
@@ -255,6 +260,7 @@ Smoke-тесты проверяют:
 | `src/FlightPreview3D.tsx` | 3D-превью |
 | `src/smoke.test.ts` | smoke-тесты |
 | `scripts/generate-dem-sample.mjs` | генератор DEM-сэмпла |
+| `scripts/analyze-nmea.mjs` | CLI-анализ внешнего NMEA-журнала |
 | `scripts/dev.mjs` | локальный dev-сервер |
 | `scripts/build.mjs` | сборка в `dist` |
 | `scripts/test.mjs` | запуск smoke-тестов |

@@ -970,6 +970,38 @@ input[type="range"] {
   line-height: 1.45;
 }
 
+.dem-provenance {
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid rgba(133, 160, 166, 0.14);
+  background: rgba(4, 11, 17, 0.45);
+}
+
+.dem-provenance span,
+.dem-provenance small {
+  display: block;
+  color: #91a4a8;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.dem-provenance b {
+  display: block;
+  margin-top: 4px;
+  color: #f4fffc;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.dem-provenance small {
+  margin-top: 6px;
+  color: #9fb0b2;
+  line-height: 1.35;
+  text-transform: none;
+}
+
 .fact-list {
   display: grid;
   gap: 9px;

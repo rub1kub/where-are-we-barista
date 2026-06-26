@@ -56,10 +56,23 @@ function run() {
   assert(taiga.finalErrorM !== null, "simulation should expose final coordinate error");
   assert(taiga.finalErrorM < 2000, "final coordinate error should stay bounded in the deterministic stand");
   assert(taiga.best.confidence >= 70, "taiga route should produce useful confidence");
+  assert(
+    taiga.autopilotOutput.courseCorrectionDeg !== null && Math.abs(taiga.autopilotOutput.courseCorrectionDeg) <= 0.2,
+    "default planned route should produce near-zero course correction",
+  );
 
   const finish = localPointToWgs84(taiga.estimatedPath[taiga.estimatedPath.length - 1]);
   assert(finish.lat > TAIGA_ROUTE.start.lat, "default route should move north-east from Vanavara");
   assert(finish.lon > TAIGA_ROUTE.start.lon, "default route should move east from Vanavara");
+
+  const offPlan = runTerrainMatching({
+    ...DEFAULT_MATCHER_CONFIG,
+    trueAzimuthDeg: DEFAULT_MATCHER_CONFIG.plannedAzimuthDeg + 8,
+  });
+  assert(
+    offPlan.autopilotOutput.courseCorrectionDeg !== null && Math.abs(offPlan.autopilotOutput.courseCorrectionDeg) >= 2,
+    "course correction should be non-zero when estimated course diverges from plan",
+  );
 
   const imported = solveFromNmea(taiga.nmea.join("\n"), {
     terrainKind: DEFAULT_MATCHER_CONFIG.terrainKind,
@@ -68,6 +81,8 @@ function run() {
     speedMinMps: DEFAULT_MATCHER_CONFIG.speedMinMps,
     speedMaxMps: DEFAULT_MATCHER_CONFIG.speedMaxMps,
     speedStepMps: DEFAULT_MATCHER_CONFIG.speedStepMps,
+    plannedAzimuthDeg: DEFAULT_MATCHER_CONFIG.plannedAzimuthDeg,
+    courseLookaheadM: DEFAULT_MATCHER_CONFIG.courseLookaheadM,
   });
   assert(!imported.truthAvailable, "NMEA solver should not require truthPath");
   assert(imported.truthPath.length === 0, "imported NMEA result must not carry synthetic truthPath");
@@ -78,7 +93,8 @@ function run() {
   assert(imported.nmeaQuality.checksumOk === imported.samples.length, "imported generated NMEA should retain checksum quality");
   assert(imported.events[0]?.code === "RA_STREAM_STARTED", "solver should emit an event log from the current calculation");
   assert(imported.events.some((event) => event.code === "BEST_CANDIDATE"), "solver should log the selected best candidate");
-  assert(imported.autopilotOutput.courseCorrectionDeg === null, "course correction should stay explicit null in MVP");
+  assert(imported.autopilotOutput.courseCorrectionDeg !== null, "imported NMEA should expose course correction when a route plan is configured");
+  assert(Math.abs(imported.autopilotOutput.courseCorrectionDeg) <= 0.2, "imported stand NMEA should stay on the planned route");
   assert(imported.autopilotOutput.confidence > 0.7, "autopilot output should carry normalized confidence");
   assert(Number.isFinite(imported.autopilotOutput.localXM), "autopilot output should expose local X coordinate");
   assert(Number.isFinite(imported.autopilotOutput.localYM), "autopilot output should expose local Y coordinate");
@@ -92,12 +108,14 @@ function run() {
     speedMinMps: DEFAULT_MATCHER_CONFIG.speedMinMps,
     speedMaxMps: DEFAULT_MATCHER_CONFIG.speedMaxMps,
     speedStepMps: DEFAULT_MATCHER_CONFIG.speedStepMps,
+    plannedAzimuthDeg: DEFAULT_MATCHER_CONFIG.plannedAzimuthDeg,
+    courseLookaheadM: DEFAULT_MATCHER_CONFIG.courseLookaheadM,
   });
   assert(!px4Imported.truthAvailable, "PX4-derived external NMEA file should solve without truth");
   assert(px4Imported.samples.length === 1690, "PX4-derived external NMEA fixture should keep every imported sentence");
   assert(px4Imported.nmeaQuality.checksumInvalid === 0, "PX4-derived external NMEA fixture should pass checksum policy");
   assert(px4Imported.events.some((event) => event.code === "RA_STREAM_STARTED"), "PX4-derived import should produce algorithm events");
-  assert(px4Imported.autopilotOutput.courseCorrectionDeg === null, "PX4-derived import should not invent course correction");
+  assert(px4Imported.autopilotOutput.courseCorrectionDeg === null, "PX4-derived NO FIX import should not expose course correction");
 
   const invalidChecksumLog = taiga.nmea.slice(0, 24).map((row) => row.replace(/\*[0-9A-F]{2}$/i, "*00")).join("\n");
   const invalidChecksumResult = solveFromNmea(invalidChecksumLog, {
@@ -107,6 +125,8 @@ function run() {
     speedMinMps: DEFAULT_MATCHER_CONFIG.speedMinMps,
     speedMaxMps: DEFAULT_MATCHER_CONFIG.speedMaxMps,
     speedStepMps: DEFAULT_MATCHER_CONFIG.speedStepMps,
+    plannedAzimuthDeg: DEFAULT_MATCHER_CONFIG.plannedAzimuthDeg,
+    courseLookaheadM: DEFAULT_MATCHER_CONFIG.courseLookaheadM,
   });
   assert(invalidChecksumResult.nmeaQuality.checksumInvalid === 24, "solver should report invalid NMEA checksums");
   assert(invalidChecksumResult.navigationStatus !== "FIX VALID", "invalid checksum majority should prevent a clean VALID status");
@@ -148,6 +168,8 @@ function run() {
       speedMinMps: DEFAULT_MATCHER_CONFIG.speedMinMps,
       speedMaxMps: DEFAULT_MATCHER_CONFIG.speedMaxMps,
       speedStepMps: DEFAULT_MATCHER_CONFIG.speedStepMps,
+      plannedAzimuthDeg: DEFAULT_MATCHER_CONFIG.plannedAzimuthDeg,
+      courseLookaheadM: DEFAULT_MATCHER_CONFIG.courseLookaheadM,
     },
     measuredProfile: Array.from({ length: 96 }, (_, index) => (index % 2 === 0 ? 980 : -120)),
   });

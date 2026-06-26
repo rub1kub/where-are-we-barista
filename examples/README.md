@@ -4,6 +4,12 @@
 
 NMEA-файл для проверки режима `Журнал NMEA` без стендовой кнопки.
 
+Запуск из CLI:
+
+```bash
+npm run nmea:analyze -- examples/px4-derived-radio-altimeter.nmea
+```
+
 Происхождение:
 
 - исходный локальный файл: `data/import/px4-fixed-wing-real-flight.csv`;

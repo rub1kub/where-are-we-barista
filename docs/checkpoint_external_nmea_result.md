@@ -16,6 +16,12 @@ examples/px4-derived-radio-altimeter.nmea
 - поле высоты GGA используется как `RA AGL` по формату кейса;
 - источник исходных данных: локальный PX4 `vehicle_gps_position` CSV, преобразованный скриптом `npm run nmea:generate-demo`.
 
+Воспроизводимый запуск без UI:
+
+```bash
+npm run nmea:analyze -- examples/px4-derived-radio-altimeter.nmea
+```
+
 ## Результат UI
 
 | Поле | Значение |
@@ -35,7 +41,7 @@ examples/px4-derived-radio-altimeter.nmea
 | ground_speed_mps | 41.0 |
 | azimuth_deg | 342 |
 | uncertainty_m | н/д |
-| course_correction_deg | не настроено |
+| course_correction_deg | н/д, потому что статус `NO FIX` |
 
 ## Интерпретация
 
