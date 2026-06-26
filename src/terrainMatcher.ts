@@ -3,6 +3,7 @@ import {
   buildGgaRadioSentence,
   parseGgaRadioSentence,
 } from "./nmeaRadioAltimeter";
+import { COPERNICUS_TAIGA_DEM } from "./copernicusDemSample";
 
 export type TerrainKind = "taiga" | "flat" | "mountain";
 
@@ -71,7 +72,7 @@ export const TAIGA_ROUTE = {
   startName: "Ванавара",
   finishName: "лагерь",
   riverName: "Подкаменная Тунгуска",
-  demName: "ЦМР стенда / шаг 30 м",
+  demName: "Copernicus DEM GLO-30 / сэмпл ЦМР",
   start: {
     lat: 60.3446,
     lon: 102.2797,
@@ -116,6 +117,31 @@ function gaussian(x: number, y: number, centerX: number, centerY: number, sigmaX
   return Math.exp(-(dx + dy)) * amplitude;
 }
 
+function sampleCopernicusTaigaDemMsl(x: number, y: number): number | null {
+  const point = localPointToWgs84({ x, y });
+  const { bounds, width, height, elevationM } = COPERNICUS_TAIGA_DEM;
+
+  if (point.lat < bounds.latMin || point.lat > bounds.latMax || point.lon < bounds.lonMin || point.lon > bounds.lonMax) {
+    return null;
+  }
+
+  const px = ((point.lon - bounds.lonMin) / (bounds.lonMax - bounds.lonMin)) * (width - 1);
+  const py = ((bounds.latMax - point.lat) / (bounds.latMax - bounds.latMin)) * (height - 1);
+  const x0 = Math.max(0, Math.min(width - 1, Math.floor(px)));
+  const y0 = Math.max(0, Math.min(height - 1, Math.floor(py)));
+  const x1 = Math.max(0, Math.min(width - 1, x0 + 1));
+  const y1 = Math.max(0, Math.min(height - 1, y0 + 1));
+  const tx = px - x0;
+  const ty = py - y0;
+  const i00 = y0 * width + x0;
+  const i10 = y0 * width + x1;
+  const i01 = y1 * width + x0;
+  const i11 = y1 * width + x1;
+  const top = elevationM[i00] * (1 - tx) + elevationM[i10] * tx;
+  const bottom = elevationM[i01] * (1 - tx) + elevationM[i11] * tx;
+  return top * (1 - ty) + bottom * ty;
+}
+
 export function terrainElevationMsl(kind: TerrainKind, x: number, y: number): number {
   const xKm = x / 1000;
   const yKm = y / 1000;
@@ -129,6 +155,11 @@ export function terrainElevationMsl(kind: TerrainKind, x: number, y: number): nu
 
   if (kind === "mountain") {
     return 760 + longRidge * 180 + crossRidge * 120 + fine * 70 + gaussian(xKm, yKm, 72, 18, 22, 12, 190);
+  }
+
+  const copernicusElevation = sampleCopernicusTaigaDemMsl(x, y);
+  if (copernicusElevation !== null) {
+    return copernicusElevation;
   }
 
   const riverValley = -gaussian(xKm, yKm, 58, 14, 75, 5, 64);

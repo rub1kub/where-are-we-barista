@@ -12,6 +12,7 @@ import {
   Settings,
   Signal,
 } from "lucide-react";
+import { FlightPreview3D } from "./FlightPreview3D";
 import {
   DEFAULT_MATCHER_CONFIG,
   MatchPoint,
@@ -23,6 +24,7 @@ import {
 } from "./terrainMatcher";
 
 type Config = typeof DEFAULT_MATCHER_CONFIG;
+type ViewMode = "operator" | "method";
 
 const TILE_SIZE = 256;
 const MAP_WIDTH = 980;
@@ -66,15 +68,7 @@ function MiniButton({ icon, label }: { icon: ReactNode; label: string }) {
   );
 }
 
-function InputRow({
-  label,
-  value,
-  help,
-}: {
-  label: string;
-  value: string;
-  help: string;
-}) {
+function InputRow({ label, value, help }: { label: string; value: string; help: string }) {
   return (
     <div className="input-row">
       <div>
@@ -90,7 +84,7 @@ function ToggleRow({ label, enabled }: { label: string; enabled: boolean }) {
   return (
     <div className="toggle-row">
       <span>{label}</span>
-      <i className={enabled ? "enabled" : ""}>{enabled ? "OK" : "выкл"}</i>
+      <i className={enabled ? "enabled" : ""}>{enabled ? "OK" : "OFF"}</i>
     </div>
   );
 }
@@ -125,7 +119,7 @@ function Slider({
           <Help text={help} />
         </span>
         <div className="stepper">
-          <button type="button" aria-label={`${label}: уменьшить`} onClick={decrease}>−</button>
+          <button type="button" aria-label={`${label}: уменьшить`} onClick={decrease}>-</button>
           <strong>{formatNumber(value, 0)} {unit}</strong>
           <button type="button" aria-label={`${label}: увеличить`} onClick={increase}>+</button>
         </div>
@@ -215,12 +209,12 @@ function SatelliteMap({ result }: { result: TerrainMatchResult }) {
     <section className="map-shell">
       <div className="map-head">
         <div>
-          <span>Карта маршрута</span>
+          <span>ЦМР + траектория</span>
           <h2>{TAIGA_ROUTE.routeName}</h2>
         </div>
         <div className="map-legend">
-          <span><i className="route-real" /> фактический путь</span>
-          <span><i className="route-found" /> найдено алгоритмом</span>
+          <span><i className="route-real" /> истинная траектория</span>
+          <span><i className="route-found" /> оценка алгоритма</span>
         </div>
       </div>
       <svg className="satellite-map" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} role="img" aria-label="Спутниковая карта тайги с маршрутом">
@@ -266,20 +260,43 @@ function SatelliteMap({ result }: { result: TerrainMatchResult }) {
   );
 }
 
+function StatusStrip({ result }: { result: TerrainMatchResult }) {
+  return (
+    <section className="status-strip">
+      <div>
+        <span>Статус</span>
+        <strong>Привязка есть</strong>
+      </div>
+      <div>
+        <span>ГНСС</span>
+        <strong className="bad">нет данных</strong>
+      </div>
+      <div>
+        <span>corr</span>
+        <strong>{result.best.correlation.toFixed(3)}</strong>
+      </div>
+      <div>
+        <span>СКО</span>
+        <strong>{formatMeters(result.best.rmseM)}</strong>
+      </div>
+      <div>
+        <span>достоверность</span>
+        <strong>{result.best.confidence}%</strong>
+      </div>
+    </section>
+  );
+}
+
 function SolutionPanel({ result }: { result: TerrainMatchResult }) {
   const finalPoint = result.estimatedPath[result.estimatedPath.length - 1];
   const finalWgs = localPointToWgs84(finalPoint);
   const confidence = result.best.confidence;
-  const status = confidence >= 80 ? "Можно использовать" : confidence >= 55 ? "Нужен контроль" : "Мало рельефа";
-  const explain =
-    confidence >= 80
-      ? "Рисунок высот под бортом совпал с картой рельефа. Координата, скорость и направление согласованы."
-      : "Совпадение есть, но рельеф недостаточно выразительный. Для борта нужен более длинный участок или второй источник.";
+  const status = confidence >= 80 ? "ПРИВЯЗКА ПОДТВЕРЖДЕНА" : confidence >= 55 ? "ТРЕБУЕТ КОНТРОЛЯ" : "РЕЛЬЕФ НЕДОСТАТОЧЕН";
 
   return (
     <aside className="solution-card">
       <div className="solution-top">
-        <span>Где мы сейчас</span>
+        <span>Оценка положения</span>
         <strong>{status}</strong>
       </div>
       <div className="coordinates">
@@ -288,102 +305,30 @@ function SolutionPanel({ result }: { result: TerrainMatchResult }) {
       </div>
       <div className="decision-grid">
         <div>
-          <span>Скорость по земле</span>
+          <span>Путевая скорость</span>
           <strong>{formatNumber(result.best.speedMps, 1)} м/с</strong>
         </div>
         <div>
-          <span>Куда летим</span>
+          <span>Азимут</span>
           <strong>{formatNumber(result.best.azimuthDeg, 0)}°</strong>
         </div>
         <div>
-          <span>Ошибка профиля</span>
+          <span>СКО профиля</span>
           <strong>{formatMeters(result.best.rmseM)}</strong>
         </div>
         <div>
-          <span>Длина маршрута</span>
+          <span>Длина трассы</span>
           <strong>{formatMeters(routeLengthM(result.truthPath))}</strong>
         </div>
       </div>
       <div className="confidence">
         <div>
-          <span>Доверие к координате</span>
+          <span>Достоверность оценки</span>
           <strong>{confidence}%</strong>
         </div>
         <i><em style={{ width: `${confidence}%` }} /></i>
       </div>
-      <div className="plain-answer">
-        <span>Простыми словами</span>
-        <p>{explain}</p>
-      </div>
     </aside>
-  );
-}
-
-function FlightPreview({ result }: { result: TerrainMatchResult }) {
-  const width = 320;
-  const height = 164;
-  const samples = result.truthPath.slice(-90);
-  const min = Math.min(...samples.map((point) => point.elevationM));
-  const max = Math.max(...samples.map((point) => point.elevationM), result.config.baroAltitudeM);
-  const last = samples[samples.length - 1];
-  const agl = result.config.baroAltitudeM - last.elevationM;
-
-  function yFor(value: number) {
-    return height - 24 - ((value - min) / Math.max(1, max - min)) * (height - 48);
-  }
-
-  const terrainPath = samples
-    .map((point, index) => {
-      const x = 16 + (index / Math.max(1, samples.length - 1)) * (width - 32);
-      const y = yFor(point.elevationM);
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const flightY = yFor(result.config.baroAltitudeM);
-  const aircraftX = width - 56;
-
-  return (
-    <section className="panel flight-preview">
-      <header>
-        <div>
-          <span>Как летит борт</span>
-          <h3>Превью полёта</h3>
-        </div>
-        <strong>{formatMeters(agl)} AGL</strong>
-      </header>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Превью полёта над рельефом">
-        <line x1="16" x2={width - 16} y1={flightY} y2={flightY} className="flight-line" />
-        <path d={terrainPath} className="preview-terrain" />
-        <path
-          d={`M ${aircraftX} ${flightY - 9} L ${aircraftX + 26} ${flightY} L ${aircraftX} ${flightY + 9} L ${aircraftX + 6} ${flightY} Z`}
-          className="preview-aircraft"
-        />
-        <line x1={aircraftX + 13} x2={aircraftX + 13} y1={flightY + 13} y2={yFor(last.elevationM)} className="agl-line" />
-        <text x="18" y="24" className="preview-label">баро 1500 м MSL</text>
-        <text x={aircraftX - 8} y={Math.min(height - 12, yFor(last.elevationM) + 18)} className="preview-label">земля</text>
-      </svg>
-    </section>
-  );
-}
-
-function FlowExplanation() {
-  const steps = [
-    ["1", "Спутники недоступны", "GPS/ГЛОНАСС не даёт координату."],
-    ["2", "Борт меряет землю", "Радиовысотомер показывает расстояние до поверхности."],
-    ["3", "Получаем рисунок рельефа", "Из 1500 м вычитаем радиовысоту и видим высоты земли."],
-    ["4", "Ищем совпадение на карте", "Где профиль совпал лучше всего, там и находится борт."],
-  ];
-
-  return (
-    <section className="flow">
-      {steps.map(([index, title, text]) => (
-        <article key={index}>
-          <b>{index}</b>
-          <strong>{title}</strong>
-          <span>{text}</span>
-        </article>
-      ))}
-    </section>
   );
 }
 
@@ -402,12 +347,12 @@ function CorrelationSurface({ result }: { result: TerrainMatchResult }) {
     <section className="panel correlation-panel">
       <header>
         <div>
-          <span>Где профиль совпал лучше всего</span>
-          <h3>Карта совпадений</h3>
+          <span>Корреляция</span>
+          <h3>Поверхность кандидатов</h3>
         </div>
         <strong>{result.best.correlation.toFixed(3)}</strong>
       </header>
-      <svg viewBox={`0 0 ${width} ${height}`} className="heatmap" role="img" aria-label="Карта совпадений по направлению и скорости">
+      <svg viewBox={`0 0 ${width} ${height}`} className="heatmap" role="img" aria-label="Карта корреляции по направлению и скорости">
         {result.heatmap.map((cell) => {
           const t = (cell.correlation - minCorr) / Math.max(0.001, maxCorr - minCorr);
           const x = cell.azimuthDeg * cellW;
@@ -459,12 +404,12 @@ function TerrainProfile({ result }: { result: TerrainMatchResult }) {
     <section className="panel profile-panel">
       <header>
         <div>
-          <span>Что сравнивает алгоритм</span>
-          <h3>Профиль рельефа по маршруту</h3>
+          <span>Профиль рельефа</span>
+          <h3>MSL = BARO - RA</h3>
         </div>
         <div className="chart-legend">
-          <span><i className="measured" /> измерено</span>
-          <span><i className="reference" /> карта</span>
+          <span><i className="measured" /> измерено РВ</span>
+          <span><i className="reference" /> эталон ЦМР</span>
         </div>
       </header>
       <svg viewBox={`0 0 ${width} ${height}`} className="profile-chart" role="img" aria-label="Профиль рельефа">
@@ -485,8 +430,8 @@ function NmeaStream({ result }: { result: TerrainMatchResult }) {
     <section className="panel nmea-panel">
       <header>
         <div>
-          <span>Что реально приходит на вход</span>
-          <h3>Поток NMEA от радиовысотомера</h3>
+          <span>Журнал NMEA</span>
+          <h3>Поток радиовысотомера</h3>
         </div>
         <strong>{result.config.sampleRateHz} Гц</strong>
       </header>
@@ -499,8 +444,56 @@ function NmeaStream({ result }: { result: TerrainMatchResult }) {
   );
 }
 
+function ValidationPanel({ result, finalErrorDeg }: { result: TerrainMatchResult; finalErrorDeg: number }) {
+  return (
+    <section className="panel facts-panel">
+      <header>
+        <div>
+          <span>Валидация</span>
+          <h3>Метрики</h3>
+        </div>
+        <CheckCircle2 size={22} />
+      </header>
+      <div className="fact-list">
+        <div><Gauge size={17} /><span>corr: <b>{result.best.correlation.toFixed(3)}</b></span></div>
+        <div><Activity size={17} /><span>Δaz: <b>{formatNumber(finalErrorDeg, 0)}°</b></span></div>
+        <div><Clock3 size={17} /><span>compute: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
+        <div><AlertTriangle size={17} /><span>защита плоского рельефа: снижает доверие</span></div>
+      </div>
+    </section>
+  );
+}
+
+function MethodologyMode() {
+  return (
+    <section className="methodology">
+      <article>
+        <h2>Методика</h2>
+        <p>Этот режим нужен для защиты и трекеров. Основной экран остаётся операторской панелью.</p>
+      </article>
+      <article>
+        <strong>1. Радиовысотомер</strong>
+        <span>РВ AGL показывает расстояние от борта до поверхности.</span>
+      </article>
+      <article>
+        <strong>2. Барометр</strong>
+        <span>БАРО MSL задаёт абсолютную высоту борта над уровнем моря.</span>
+      </article>
+      <article>
+        <strong>3. Профиль</strong>
+        <span>MSL = BARO - RA. Так получается профиль высот земли вдоль трассы.</span>
+      </article>
+      <article>
+        <strong>4. Корреляция</strong>
+        <span>Система перебирает азимут 0-359° и скорость, затем ищет максимум corr.</span>
+      </article>
+    </section>
+  );
+}
+
 export function App() {
   const [config, setConfig] = useState<Config>(DEFAULT_MATCHER_CONFIG);
+  const [mode, setMode] = useState<ViewMode>("operator");
   const result = useMemo(() => runTerrainMatching(config), [config]);
   const routeKm = routeLengthM(result.truthPath) / 1000;
   const finalErrorDeg = angleError(result.best.azimuthDeg, config.trueAzimuthDeg);
@@ -519,13 +512,14 @@ export function App() {
         <div className="brand-block">
           <div className="brand-icon"><MapPinned size={24} /></div>
           <div>
-            <strong>ГДЕ МЫ, БАРИСТА?</strong>
-            <span>кейс «Полёт вслепую»</span>
+            <strong>КРОТ</strong>
+            <span>команда «Где мы, Бариста?»</span>
           </div>
         </div>
-        <div className="top-status"><Signal size={15} /> спутниковая навигация недоступна</div>
+        <div className="top-status"><Signal size={15} /> РЕЛЬЕФНАЯ НАВИГАЦИЯ / ГНСС НЕДОСТУПНА</div>
         <div className="top-actions">
-          <button type="button"><span /> Запись</button>
+          <button className={mode === "operator" ? "active" : ""} type="button" onClick={() => setMode("operator")}>Оператор</button>
+          <button className={mode === "method" ? "active" : ""} type="button" onClick={() => setMode("method")}>Методика</button>
           <MiniButton icon={<Pause size={17} />} label="Пауза" />
           <MiniButton icon={<Settings size={17} />} label="Настройки" />
         </div>
@@ -534,126 +528,118 @@ export function App() {
       <main className="ops-grid">
         <aside className="left-rail">
           <section className="rail-panel">
-            <h2>Что поступает на вход</h2>
+            <h2>Входные данные</h2>
             <InputRow
-              label="Карта рельефа"
+              label="ЦМР"
               value={TAIGA_ROUTE.demName}
-              help="Карта высот земли. По ТЗ это может быть Copernicus GLO-30, SRTM или ALOS."
+              help="Цифровая модель рельефа. В production заменяется на Copernicus GLO-30, SRTM или ALOS."
             />
             <InputRow
-              label="Барометр"
-              value={`${formatNumber(config.baroAltitudeM, 0)} м над морем`}
-              help="Барометр даёт абсолютную высоту борта над уровнем моря. В кейсе задано 1500 м."
+              label="БАРО MSL"
+              value={`${formatNumber(config.baroAltitudeM, 0)} м`}
+              help="Абсолютная высота борта над уровнем моря. В кейсе задано 1500 м."
             />
             <InputRow
-              label="Радиовысотомер"
+              label="РВ AGL"
               value={`NMEA · ${config.sampleRateHz} Гц`}
-              help="Датчик расстояния до земли. NMEA — текстовый формат сообщений, который указан в ТЗ."
+              help="Радиовысотомер: расстояние от борта до поверхности. Формат входа — NMEA-0183."
             />
             <InputRow
-              label="Диапазон скорости"
+              label="Диапазон Vпут"
               value={`${config.speedMinMps}-${config.speedMaxMps} м/с`}
-              help="Алгоритм не знает скорость заранее, поэтому перебирает разумный диапазон."
+              help="Диапазон перебора путевой скорости."
             />
           </section>
 
           <section className="rail-panel">
             <div className="rail-title">
-              <h2>Вводные стенда</h2>
+              <h2>Параметры симуляции</h2>
               <button type="button" onClick={reset} aria-label="Сбросить вводные"><RotateCcw size={16} /></button>
             </div>
             <Slider
-              label="Скорость борта"
+              label="Vпут"
               value={config.trueSpeedMps}
               min={35}
               max={65}
               step={1}
               unit="м/с"
-              help="Стендовая скорость. В реальном расчёте она восстанавливается по совпадению профиля."
+              help="Стендовая скорость. Алгоритм восстанавливает её по максимуму корреляции."
               onChange={(value) => updateConfig("trueSpeedMps", value)}
             />
             <Slider
-              label="Направление"
+              label="Азимут"
               value={config.trueAzimuthDeg}
               min={0}
               max={359}
               step={1}
               unit="°"
-              help="Куда летит борт. 0° — север, 90° — восток."
+              help="Путевой угол: 0° — север, 90° — восток."
               onChange={(value) => updateConfig("trueAzimuthDeg", value)}
             />
             <Slider
-              label="Длительность"
+              label="Окно"
               value={config.durationS}
               min={1200}
               max={5400}
               step={300}
               unit="с"
-              help="Чем длиннее участок, тем больше рисунок рельефа и тем увереннее поиск."
+              help="Длительность участка корреляции."
               onChange={(value) => updateConfig("durationS", value)}
             />
             <Slider
-              label="Шум датчика"
+              label="Шум РВ"
               value={config.radioNoiseM}
               min={0}
               max={12}
               step={1}
               unit="м"
-              help="Показывает, что будет при неточном радиовысотомере."
+              help="Шум радиовысотомера в метрах."
               onChange={(value) => updateConfig("radioNoiseM", value)}
             />
           </section>
 
           <section className="rail-panel">
             <h2>Состояние системы</h2>
-            <ToggleRow label="Спутниковая навигация" enabled={false} />
-            <ToggleRow label="Барометр" enabled />
-            <ToggleRow label="Радиовысотомер" enabled />
-            <ToggleRow label="Карта рельефа" enabled />
-            <ToggleRow label="Вычислитель" enabled />
+            <ToggleRow label="ГНСС" enabled={false} />
+            <ToggleRow label="БАРО" enabled />
+            <ToggleRow label="РВ" enabled />
+            <ToggleRow label="ЦМР" enabled />
+            <ToggleRow label="КОНТУР" enabled />
           </section>
         </aside>
 
         <section className="center-stage">
-          <FlowExplanation />
-          <SatelliteMap result={result} />
-          <div className="bottom-grid">
-            <NmeaStream result={result} />
-            <TerrainProfile result={result} />
-          </div>
+          {mode === "operator" ? (
+            <>
+              <StatusStrip result={result} />
+              <FlightPreview3D result={result} />
+              <SatelliteMap result={result} />
+              <div className="bottom-grid">
+                <NmeaStream result={result} />
+                <TerrainProfile result={result} />
+              </div>
+            </>
+          ) : (
+            <MethodologyMode />
+          )}
         </section>
 
         <aside className="right-rail">
           <SolutionPanel result={result} />
-          <FlightPreview result={result} />
-          <section className="panel facts-panel">
-            <header>
-              <div>
-                <span>Проверка стенда</span>
-                <h3>Почему ответ выглядит надёжно</h3>
-              </div>
-              <CheckCircle2 size={22} />
-            </header>
-            <div className="fact-list">
-              <div><Gauge size={17} /><span>Совпадение профилей: <b>{result.best.correlation.toFixed(3)}</b></span></div>
-              <div><Activity size={17} /><span>Ошибка направления на стенде: <b>{formatNumber(finalErrorDeg, 0)}°</b></span></div>
-              <div><Clock3 size={17} /><span>Расчёт на ноутбуке: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
-              <div><AlertTriangle size={17} /><span>Если рельеф плоский, доверие автоматически падает.</span></div>
-            </div>
-          </section>
+          <ValidationPanel result={result} finalErrorDeg={finalErrorDeg} />
           <CorrelationSurface result={result} />
           <section className="panel region-panel">
             <header>
               <div>
-                <span>Район демонстрации</span>
+                <span>Район</span>
                 <h3>{TAIGA_ROUTE.region}</h3>
               </div>
               <Satellite size={22} />
             </header>
             <p>{TAIGA_ROUTE.note}</p>
             <div className="region-stats">
-              <span>Маршрут <b>{formatNumber(routeKm, 1)} км</b></span>
-              <span>Река <b>{TAIGA_ROUTE.riverName}</b></span>
+              <span>трасса <b>{formatNumber(routeKm, 1)} км</b></span>
+              <span>река <b>{TAIGA_ROUTE.riverName}</b></span>
             </div>
           </section>
         </aside>

@@ -1,0 +1,136 @@
+{
+  "schemaVersion": "1.0",
+  "product": {
+    "name": "КРОТ",
+    "fullName": "Корреляционный Рельефный Определитель Траектории",
+    "teamName": "Где мы, Бариста?",
+    "caseName": "Полёт вслепую",
+    "domain": "гражданская навигация лёгких БВС и опционально-пилотируемых воздушных судов",
+    "oneLine": "Определение координат, путевой скорости и азимута без ГНСС по радиовысотомеру и цифровой модели рельефа."
+  },
+  "missionScenario": {
+    "type": "гражданская доставка груза",
+    "region": "Красноярский край, средняя тайга",
+    "route": "Ванавара → геологоразведочный лагерь",
+    "navigationState": "ГНСС недоступна, БАРО/РВ/ЦМР доступны",
+    "safetyBoundary": "Не добавлять военное применение, наведение, поражение, тактические рекомендации или оружейные сценарии."
+  },
+  "algorithmContract": {
+    "inputs": [
+      "БАРО MSL: абсолютная высота борта",
+      "РВ AGL: радиовысота в NMEA-0183",
+      "ЦМР: Copernicus DEM GLO-30 сэмпл района",
+      "диапазон путевой скорости",
+      "окно наблюдения"
+    ],
+    "process": [
+      "РВ AGL преобразуется в профиль абсолютных высот рельефа: MSL = БАРО MSL - РВ AGL",
+      "по ЦМР строятся эталонные профили",
+      "азимут перебирается от 0 до 359 градусов с шагом 1 градус",
+      "скорость перебирается в заданном диапазоне",
+      "для каждого варианта считается корреляция и СКО",
+      "лучший максимум даёт координату, Vпут, азимут и оценку достоверности"
+    ],
+    "outputs": [
+      "координата WGS-84",
+      "путевая скорость",
+      "азимут",
+      "corr",
+      "СКО профиля",
+      "достоверность",
+      "тепловая карта корреляции",
+      "траектория на карте",
+      "профиль рельефа"
+    ]
+  },
+  "dataSources": {
+    "dem": {
+      "activeSource": "Copernicus DEM GLO-30 COG",
+      "generatedFile": "src/copernicusDemSample.ts",
+      "generator": "scripts/generate-dem-sample.mjs",
+      "sourceTiles": [
+        "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N60_00_E102_00_DEM/Copernicus_DSM_COG_10_N60_00_E102_00_DEM.tif",
+        "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N60_00_E103_00_DEM/Copernicus_DSM_COG_10_N60_00_E103_00_DEM.tif",
+        "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N60_00_E104_00_DEM/Copernicus_DSM_COG_10_N60_00_E104_00_DEM.tif",
+        "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N60_00_E105_00_DEM/Copernicus_DSM_COG_10_N60_00_E105_00_DEM.tif"
+      ],
+      "sampleGrid": {
+        "width": 420,
+        "height": 180,
+        "latMin": 60.25,
+        "latMax": 60.95,
+        "lonMin": 102.15,
+        "lonMax": 105.65
+      }
+    },
+    "radioAltimeter": {
+      "format": "NMEA-0183",
+      "implementation": "src/nmeaRadioAltimeter.ts",
+      "defaultRateHz": 2,
+      "supportedCaseRateHz": "1-10"
+    }
+  },
+  "commands": {
+    "install": "npm install",
+    "dev": "npm run dev",
+    "test": "npm test",
+    "build": "npm run build",
+    "regenerateDemSample": "npm run dem:generate"
+  },
+  "files": {
+    "src/terrainMatcher.ts": "корреляционный алгоритм, DEM-сэмплирование, confidence, маршруты",
+    "src/copernicusDemSample.ts": "сгенерированная таблица высот Copernicus DEM",
+    "scripts/generate-dem-sample.mjs": "загрузка COG-тайлов и генерация DEM-сэмпла",
+    "src/nmeaRadioAltimeter.ts": "NMEA-0183 радиовысотомера",
+    "src/App.tsx": "операторский интерфейс и режим Методика",
+    "src/FlightPreview3D.tsx": "Three.js сцена полёта БВС над тайгой",
+    "src/styles.css": "тёмная квадратная инженерная тема",
+    "src/smoke.test.ts": "smoke-проверки алгоритма"
+  },
+  "uiRules": {
+    "defaultMode": "Оператор",
+    "secondaryMode": "Методика",
+    "visualStyle": "тёмная, квадратная, техническая, плотная панель",
+    "allowedAbbreviations": [
+      "ГНСС",
+      "NMEA",
+      "ЦМР",
+      "БАРО",
+      "РВ",
+      "MSL",
+      "AGL",
+      "WGS-84",
+      "corr",
+      "СКО"
+    ],
+    "forbiddenMainScreenPhrases": [
+      "простыми словами",
+      "почему ответ выглядит надёжно",
+      "борт меряет землю",
+      "рисунок рельефа",
+      "можно использовать",
+      "что реально происходит",
+      "куда летим",
+      "где мы сейчас"
+    ]
+  },
+  "verification": {
+    "required": [
+      "npm test",
+      "npm run build"
+    ],
+    "browserSmoke": [
+      "открыть http://127.0.0.1:5173/",
+      "проверить режим Оператор по умолчанию",
+      "проверить видимый 3D canvas",
+      "проверить карту маршрута",
+      "переключить Методика",
+      "проверить отсутствие console error/warn"
+    ]
+  },
+  "knownRisks": [
+    "DEM-сэмпл покрывает демонстрационный район, но не является полноценным тайловым DEM-движком для любого маршрута.",
+    "Ввод реального NMEA-журнала через UI ещё не реализован.",
+    "Для бортового вычислителя потребуется профилирование и перенос тяжёлого перебора в WebWorker или WASM."
+  ]
+}

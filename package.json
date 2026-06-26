@@ -1,10 +1,11 @@
 {
-  "name": "where-are-we-barista",
+  "name": "krot-terrain-navigation",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dem:generate": "node scripts/generate-dem-sample.mjs",
     "build": "tsc --noEmit && node scripts/build.mjs",
     "test": "node scripts/test.mjs"
   },
@@ -19,6 +20,7 @@
     "@types/react-dom": "^18.3.0",
     "@types/three": "^0.184.1",
     "esbuild": "^0.28.1",
+    "geotiff": "^3.0.5",
     "typescript": "^5.5.3"
   }
 }
