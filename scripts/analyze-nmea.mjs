@@ -156,20 +156,21 @@ if (request.json) {
   console.log("КРОТ: анализ NMEA");
   console.log("----------------------------------------");
   console.log(\`файл: \${output.source_file}\`);
-  console.log(\`truth: \${output.truth}\`);
+  console.log(\`истинная траектория: \${output.truth === "unavailable" ? "не передана" : output.truth}\`);
   console.log(\`статус: \${output.navigation_status}\`);
   console.log(\`причина: \${output.status_reason}\`);
   console.log(\`строк NMEA: \${output.samples}\`);
-  console.log(\`corr: \${output.best_corr} / second \${output.second_corr}\`);
+  console.log(\`совпадение: \${output.best_corr} / второй пик \${output.second_corr}\`);
   console.log(\`зазор: \${output.ambiguity_margin}\`);
-  console.log(\`СКО: \${output.profile_rmse_m} м\`);
+  console.log(\`ошибка профиля: \${output.profile_rmse_m} м\`);
   console.log(\`достоверность: \${output.confidence}\`);
   console.log(\`время расчёта: \${output.compute_ms} мс\`);
   console.log(\`локально: X \${output.local_x_m} м / Y \${output.local_y_m} м\`);
   console.log(\`wgs84: \${output.lat}, \${output.lon}\`);
   console.log(\`Vпут: \${output.ground_speed_mps} м/с\`);
   console.log(\`азимут: \${output.azimuth_deg}°\`);
-  console.log(\`ЦМР: \${output.dem.source_name} / \${output.dem.grid.width}x\${output.dem.grid.height}\`);
+  console.log(\`поправка курса: \${output.course_correction_deg === null ? "н/д" : output.course_correction_deg + "°"}\`);
+  console.log(\`карта высот: \${output.dem.source_name} / \${output.dem.grid.width}x\${output.dem.grid.height}\`);
 }
 `;
 
