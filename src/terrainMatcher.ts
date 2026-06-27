@@ -35,6 +35,7 @@ export type SolverConfig = Pick<
   shiftCandidatesM?: number[];
   plannedAzimuthDeg?: number;
   courseLookaheadM?: number;
+  smoothingNoiseM?: number;
 };
 
 export type NavigationStatus = "FIX VALID" | "FIX DEGRADED" | "FIX AMBIGUOUS" | "LOW RELIEF" | "NO FIX";
@@ -192,6 +193,22 @@ function deterministicNoise(index: number, amplitudeM: number): number {
   const fractional = base - Math.floor(base);
   const slow = Math.sin(index * 0.023) * 0.45 + Math.cos(index * 0.011) * 0.25;
   return (fractional * 2 - 1 + slow) * amplitudeM;
+}
+
+// 1-D Kalman filter (constant-position model) for altitude profile smoothing.
+// processNoiseVar: expected terrain change variance between samples (m²).
+// measurementNoiseVar: radio altimeter variance (noiseM²).
+function kalmanSmooth1D(measurements: number[], processNoiseVar: number, measurementNoiseVar: number): number[] {
+  if (measurements.length === 0) return [];
+  let x = measurements[0];
+  let p = measurementNoiseVar;
+  return measurements.map((z) => {
+    const pPred = p + processNoiseVar;
+    const k = pPred / (pPred + measurementNoiseVar);
+    x = x + k * (z - x);
+    p = (1 - k) * pPred;
+    return x;
+  });
 }
 
 function gaussian(x: number, y: number, centerX: number, centerY: number, sigmaX: number, sigmaY: number, amplitude: number): number {
@@ -577,14 +594,17 @@ export function solveFromMeasuredProfile({
 
   const sampleCount = measuredProfile.length;
   const nmeaQuality = summarizeNmeaQuality(samples);
-  const terrainReliefM = measuredRelief(measuredProfile);
-  const terrainStdM = standardDeviation(measuredProfile);
+  const smoothedProfile = config.smoothingNoiseM && config.smoothingNoiseM > 0
+    ? kalmanSmooth1D(measuredProfile, 9, config.smoothingNoiseM * config.smoothingNoiseM)
+    : measuredProfile;
+  const terrainReliefM = measuredRelief(smoothedProfile);
+  const terrainStdM = standardDeviation(smoothedProfile);
   const indexes = downsampleIndexes(sampleCount, 260);
   const rawTimes = sampleTimesS && sampleTimesS.length === sampleCount
     ? sampleTimesS
     : measuredProfile.map((_, index) => index / config.sampleRateHz);
   const matchTimes = indexes.map((index) => rawTimes[index]);
-  const measuredMatchProfile = indexes.map((index) => measuredProfile[index]);
+  const measuredMatchProfile = indexes.map((index) => smoothedProfile[index]);
   const measuredSum = measuredMatchProfile.reduce((sum, value) => sum + value, 0);
   const measuredMean = measuredSum / Math.max(1, measuredMatchProfile.length);
   const measuredVariance =
@@ -736,7 +756,7 @@ export function solveFromNmea(text: string, config: SolverConfig): TerrainMatchR
   const sampleTimesS = normalizeSampleTimes(samples, config.sampleRateHz);
 
   return solveFromMeasuredProfile({
-    config,
+    config: { ...config, smoothingNoiseM: config.smoothingNoiseM ?? 4 },
     measuredProfile,
     sampleTimesS,
     nmea,
@@ -778,7 +798,7 @@ export function simulateFlight(config: MatcherConfig): {
 export function runTerrainMatching(config: MatcherConfig): TerrainMatchResult {
   const simulation = simulateFlight(config);
   const solved = solveFromMeasuredProfile({
-    config,
+    config: { ...config, smoothingNoiseM: config.radioNoiseM },
     measuredProfile: simulation.measuredProfile,
     sampleTimesS: simulation.sampleTimesS,
     nmea: simulation.nmea,
