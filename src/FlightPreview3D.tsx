@@ -30,7 +30,7 @@ function applyTheme3D(
   scene.background = new THREE.Color(sky);
   if (scene.fog instanceof THREE.FogExp2) {
     scene.fog.color.set(sky);
-    scene.fog.density = isLight ? 0.068 : 0.072;
+    scene.fog.density = isLight ? 0.095 : 0.10;
   }
   if (horizon) (horizon.material as THREE.MeshBasicMaterial).color.set(isLight ? 0x7ab8d8 : 0x0a1c14);
   if (ambient) {
@@ -303,19 +303,21 @@ function makeTerrainTexture(): THREE.CanvasTexture {
 }
 
 function makeTerrainMesh(texture: THREE.Texture): THREE.Mesh {
-  const geometry = new THREE.PlaneGeometry(SCENE_WIDTH, SCENE_DEPTH, TERRAIN_SEGMENTS_X, TERRAIN_SEGMENTS_Z);
+  // Geometry is 2× the DEM viewport so the camera never sees the edge.
+  const geometry = new THREE.PlaneGeometry(SCENE_WIDTH * 2, SCENE_DEPTH * 2, 220, 92);
   geometry.rotateX(-Math.PI / 2);
   const position = geometry.getAttribute("position") as THREE.BufferAttribute;
-  const halfW = SCENE_WIDTH / 2;
-  const halfD = SCENE_DEPTH / 2;
-  const edgeFloor = elevationToSceneY(COPERNICUS_TAIGA_DEM.minElevationM) - 0.18;
+  const halfW = SCENE_WIDTH;      // half of SCENE_WIDTH * 2
+  const halfD = SCENE_DEPTH;      // half of SCENE_DEPTH * 2
+  const edgeFloor = elevationToSceneY(COPERNICUS_TAIGA_DEM.minElevationM) - 0.22;
 
   for (let i = 0; i < position.count; i += 1) {
     const x = position.getX(i);
     const z = position.getZ(i);
     const nx = Math.abs(x) / halfW;
     const nz = Math.abs(z) / halfD;
-    const edgeBlend = smoothstep(0.62, 1.0, Math.max(nx, nz));
+    // Fade only the outer 12% so no visible mesa — fog handles the rest.
+    const edgeBlend = smoothstep(0.88, 1.0, Math.max(nx, nz));
     const terrainY = terrainYAtScene(x, z);
     position.setY(i, lerp(terrainY, edgeFloor, edgeBlend));
   }
@@ -516,7 +518,7 @@ export function FlightPreview3D({
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x071018);
-    scene.fog = new THREE.FogExp2(0x071018, 0.072);
+    scene.fog = new THREE.FogExp2(0x071018, 0.10);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 120);
@@ -537,7 +539,6 @@ export function FlightPreview3D({
     let terrainTexture: THREE.Texture = makeTerrainTexture();
     let disposed = false;
     const terrainMesh = makeTerrainMesh(terrainTexture);
-    terrainMesh.scale.set(1.28, 1, 1.22);
     const terrainMaterial = terrainMesh.material as THREE.MeshStandardMaterial;
     scene.add(terrainMesh);
 
