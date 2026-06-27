@@ -1,4 +1,4 @@
-import { ChangeEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -210,6 +210,7 @@ function NmeaImportPanel({
   rawText,
   error,
   importedResult,
+  isLoading,
   onTextChange,
   onFileChange,
   onAnalyze,
@@ -220,6 +221,7 @@ function NmeaImportPanel({
   rawText: string;
   error: string | null;
   importedResult: TerrainMatchResult | null;
+  isLoading: boolean;
   onTextChange: (value: string) => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onAnalyze: () => void;
@@ -254,14 +256,14 @@ function NmeaImportPanel({
         placeholder="$GPGGA,123519.111,,,,,,,,545.4,M,46.9,M,,*7F"
       />
       <div className="nmea-import-actions">
-        <label className="file-button">
+        <label className="file-button" aria-disabled={isLoading}>
           Файл
-          <input accept=".txt,.nmea,.log" type="file" onChange={onFileChange} />
+          <input accept=".txt,.nmea,.log" type="file" onChange={onFileChange} disabled={isLoading} />
         </label>
-        <button type="button" onClick={onUseStandLog}>Журнал стенда</button>
-        <button type="button" onClick={onUseControlLog}>Контроль Ванавара</button>
-        <button type="button" onClick={onUsePx4Log}>PX4 пример</button>
-        <button className="primary" type="button" onClick={onAnalyze}>Рассчитать по журналу</button>
+        <button type="button" disabled={isLoading} onClick={onUseStandLog}>Журнал стенда</button>
+        <button type="button" disabled={isLoading} onClick={onUseControlLog}>{isLoading ? "Загрузка…" : "Контроль Ванавара"}</button>
+        <button type="button" disabled={isLoading} onClick={onUsePx4Log}>{isLoading ? "Загрузка…" : "PX4 пример"}</button>
+        <button className="primary" type="button" disabled={isLoading} onClick={onAnalyze}>Рассчитать по журналу</button>
       </div>
       <div className="nmea-import-state">
         <span>строк <b>{lineCount}</b></span>
@@ -824,11 +826,14 @@ export function App() {
   const [rawNmeaText, setRawNmeaText] = useState("");
   const [importedResult, setImportedResult] = useState<TerrainMatchResult | null>(null);
   const [nmeaError, setNmeaError] = useState<string | null>(null);
+  const [isLoadingNmea, setLoadingNmea] = useState(false);
   const [replayState, setReplayState] = useState<FlightReplayState | null>(null);
   const [isReplayPaused, setReplayPaused] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [replaySpeedMultiplier, setReplaySpeedMultiplier] = useState(120);
-  const simulationResult = useMemo(() => runTerrainMatching(config), [config]);
+  // Defer heavy terrain matching computation so slider thumb updates immediately.
+  const deferredConfig = useDeferredValue(config);
+  const simulationResult = useMemo(() => runTerrainMatching(deferredConfig), [deferredConfig]);
   const result = inputMode === "nmea" ? importedResult : simulationResult;
   const routeKm = result ? routeLengthM(result.truthAvailable ? result.truthPath : result.estimatedPath) / 1000 : 0;
   const cumulativeEstimateDistances = useMemo(() => result ? buildCumulativeDistances(result.estimatedPath) : [], [result]);
@@ -931,6 +936,7 @@ export function App() {
     setInputMode("nmea");
     setImportedResult(null);
     setNmeaError(null);
+    setLoadingNmea(true);
     try {
       const response = await fetch(VANAVARA_CONTROL_NMEA_URL, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -940,6 +946,8 @@ export function App() {
     } catch {
       setImportedResult(null);
       setNmeaError("Не удалось загрузить контрольный журнал Ванавары из examples.");
+    } finally {
+      setLoadingNmea(false);
     }
   }
 
@@ -947,6 +955,7 @@ export function App() {
     setInputMode("nmea");
     setImportedResult(null);
     setNmeaError(null);
+    setLoadingNmea(true);
     try {
       const response = await fetch(PX4_DEMO_NMEA_URL, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -955,7 +964,9 @@ export function App() {
       solveNmeaText(text);
     } catch {
       setImportedResult(null);
-      setNmeaError("Не удалось загрузить PX4 пример из data/import.");
+      setNmeaError("Не удалось загрузить PX4 пример из examples.");
+    } finally {
+      setLoadingNmea(false);
     }
   }
 
@@ -1102,6 +1113,7 @@ export function App() {
                 rawText={rawNmeaText}
                 error={nmeaError}
                 importedResult={importedResult}
+                isLoading={isLoadingNmea}
                 onTextChange={handleNmeaTextChange}
                 onFileChange={loadNmeaFile}
                 onAnalyze={analyzeNmeaLog}
