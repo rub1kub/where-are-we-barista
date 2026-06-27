@@ -229,7 +229,7 @@ function ModeSwitch({
         Стенд
       </button>
       <button className={mode === "nmea" ? "active" : ""} type="button" onClick={() => onChange("nmea")}>
-        Журнал NMEA
+        Проверочный журнал
       </button>
     </div>
   );
@@ -276,7 +276,7 @@ function NmeaImportPanel({
 
   return (
     <div className="nmea-import">
-      <label htmlFor="nmea-log">Журнал радиовысотомера</label>
+      <label htmlFor="nmea-log">Проверочный журнал радиовысотомера</label>
       <textarea
         id="nmea-log"
         value={rawText}
@@ -289,7 +289,7 @@ function NmeaImportPanel({
           Файл
           <input accept=".txt,.nmea,.log" type="file" onChange={onFileChange} disabled={isLoading} />
         </label>
-        <button type="button" disabled={isLoading} onClick={onUseStandLog}>Журнал стенда</button>
+        <button type="button" disabled={isLoading} onClick={onUseStandLog}>Пример стенда</button>
         <button type="button" disabled={isLoading} onClick={onUseControlLog}>{isLoading ? "Загрузка…" : "Контроль Ванавара"}</button>
         <button type="button" disabled={isLoading} onClick={onUsePx4Log}>{isLoading ? "Загрузка…" : "PX4 пример"}</button>
         <button className="primary" type="button" disabled={isLoading} onClick={onAnalyze}>Рассчитать по журналу</button>
@@ -441,8 +441,8 @@ function StatusStrip({ result }: { result: TerrainMatchResult }) {
         <strong className={statusClass(result.navigationStatus)}>{statusLabel(result.navigationStatus)}</strong>
       </div>
       <div>
-        <span>ГНСС</span>
-        <strong className="bad">нет данных</strong>
+        <span>вход</span>
+        <strong>РВ + ЦМР</strong>
       </div>
       <div>
         <span>corr</span>
@@ -622,7 +622,7 @@ function NmeaStream({ result, currentIndex }: { result: TerrainMatchResult; curr
     <section className="panel nmea-panel">
       <header>
         <div>
-          <span>Журнал NMEA</span>
+          <span>Проверочный журнал</span>
           <h3>Поток радиовысотомера</h3>
         </div>
         <strong>№{end}</strong>
@@ -670,15 +670,15 @@ function ValidationPanel({ result }: { result: TerrainMatchResult }) {
   );
 }
 
-function AutopilotOutputPanel({ result }: { result: TerrainMatchResult }) {
+function AlgorithmOutputPanel({ result }: { result: TerrainMatchResult }) {
   const output = result.autopilotOutput;
 
   return (
     <section className="panel autopilot-panel">
       <header>
         <div>
-          <span>Канал автопилота</span>
-          <h3>Данные навигации</h3>
+          <span>Выход алгоритма</span>
+          <h3>Результат расчёта</h3>
         </div>
         <Signal size={22} />
       </header>
@@ -712,6 +712,18 @@ function AutopilotOutputPanel({ result }: { result: TerrainMatchResult }) {
           <b>{formatNumber(output.confidence, 2)}</b>
         </div>
         <div>
+          <span>Совпадение профилей</span>
+          <b>{result.best.correlation.toFixed(3)}</b>
+        </div>
+        <div>
+          <span>Ошибка профиля</span>
+          <b>{formatMeters(result.best.rmseM)}</b>
+        </div>
+        <div>
+          <span>Время расчёта</span>
+          <b>{formatNumber(result.computeMs, 0)} мс</b>
+        </div>
+        <div>
           <span>Статус</span>
           <b>{statusLabel(output.navigationStatus)}</b>
         </div>
@@ -724,8 +736,8 @@ function AutopilotOutputPanel({ result }: { result: TerrainMatchResult }) {
           <b>{result.nmeaQuality.checksumInvalid > 0 ? `ошибка ${result.nmeaQuality.checksumInvalid}` : "норма"}</b>
         </div>
         <div className="wide">
-          <span>Поправка курса</span>
-          <b>{output.courseCorrectionDeg === null ? "н/д" : `${formatNumber(output.courseCorrectionDeg, 1)}°`}</b>
+          <span>Основа расчёта</span>
+          <b>РВ + 1500 м + ЦМР</b>
         </div>
       </div>
     </section>
@@ -766,28 +778,28 @@ function MethodologyMode() {
         <span>Радиовысотомер измеряет расстояние от борта до поверхности.</span>
       </article>
       <article>
-        <strong>2. Барометр</strong>
-        <span>Барометр задаёт абсолютную высоту борта над уровнем моря.</span>
+        <strong>2. Высота 1500 м</strong>
+        <span>В кейсе высота борта над уровнем моря постоянная: 1500 м MSL.</span>
       </article>
       <article>
         <strong>3. Профиль</strong>
-        <span>Высота земли = Барометр − Радиовысотомер. Так получается профиль рельефа вдоль трассы.</span>
+        <span>Высота земли = 1500 м − Радиовысотомер. Так получается профиль рельефа вдоль трассы.</span>
       </article>
       <article>
         <strong>4. Корреляция</strong>
         <span>Система перебирает азимут 0-359° и скорость, затем ищет максимум corr.</span>
       </article>
       <article>
-        <strong>5. Данные стенда</strong>
-        <span>ЦМР взята из сэмпла Copernicus GLO-30, спутниковая подложка — ArcGIS World Imagery, NMEA можно заменить внешним журналом.</span>
+        <strong>5. Проверочный журнал</strong>
+        <span>В финале NMEA-журнал радиовысотомера загружается в этот же контур без дополнительных датчиков и truth-траектории.</span>
       </article>
       <article>
         <strong>6. 3D-реконструкция</strong>
         <span>Превью не управляет расчётом: оно показывает текущую найденную траекторию, скорость и высоту над землёй из результата алгоритма.</span>
       </article>
       <article>
-        <strong>7. Поправка курса</strong>
-        <span>Если статус надёжен, КРОТ сравнивает оценённый азимут с плановой линией маршрута и выдаёт рекомендательную поправку курса.</span>
+        <strong>7. Шум РВ</strong>
+        <span>Стенд позволяет менять шум радиовысотомера и смотреть, как меняются corr, СКО, доверие и статус.</span>
       </article>
     </section>
   );
@@ -799,7 +811,7 @@ function NmeaAwaitingState({ rawText, error }: { rawText: string; error: string 
     <section className="panel nmea-empty-panel">
       <header>
         <div>
-          <span>Журнал NMEA</span>
+          <span>Проверочный журнал</span>
           <h3>{error ? "Расчёт отклонён" : "Оценка не рассчитана"}</h3>
         </div>
         <AlertTriangle size={22} />
@@ -825,7 +837,7 @@ function NoNavigationOutputPanel({ rawText, error }: { rawText: string; error: s
     <section className="panel autopilot-panel no-output-panel">
       <header>
         <div>
-          <span>Выход для автопилота</span>
+          <span>Выход алгоритма</span>
           <h3>Данные не готовы</h3>
         </div>
         <Signal size={22} />
@@ -1040,7 +1052,7 @@ export function App() {
           <div className="brand-icon"><MapPinned size={24} /></div>
           <strong className="brand-name">КРОТ</strong>
         </div>
-        <div className="top-status"><Signal size={15} /> РЕЛЬЕФНАЯ НАВИГАЦИЯ / ГНСС НЕДОСТУПНА</div>
+        <div className="top-status"><Signal size={15} /> РВ + 1500 М + ЦМР / КОРРЕЛЯЦИОННЫЙ ПОИСК</div>
         <div className="top-actions">
           <button className={mode === "operator" ? "active" : ""} type="button" onClick={() => setMode("operator")}>Оператор</button>
           <button className={mode === "method" ? "active" : ""} type="button" onClick={() => setMode("method")}>Методика</button>
@@ -1099,9 +1111,9 @@ export function App() {
               help="Цифровая модель рельефа. В рабочем контуре заменяется на Copernicus GLO-30, SRTM или ALOS."
             />
             <InputRow
-              label="Барометр МСЛ"
+              label="Высота MSL"
               value={`${formatNumber(config.baroAltitudeM, 0)} м`}
-              help="Абсолютная высота борта над уровнем моря. В кейсе задано 1500 м."
+              help="Постоянная абсолютная высота борта над уровнем моря. В кейсе задано 1500 м."
             />
             <InputRow
               label="Радиовысотомер"
@@ -1112,11 +1124,6 @@ export function App() {
               label="Диапазон скорости"
               value={`${config.speedMinMps}-${config.speedMaxMps} м/с`}
               help="Диапазон перебора путевой скорости."
-            />
-            <InputRow
-              label="План курса"
-              value={`${formatNumber(config.plannedAzimuthDeg, 0)}° · ${formatMeters(config.courseLookaheadM)}`}
-              help="Плановая линия маршрута для расчёта рекомендательной поправки курса."
             />
           </section>
 
@@ -1187,11 +1194,10 @@ export function App() {
 
           <section className="rail-panel">
             <h2>Состояние системы</h2>
-            <ToggleRow label="ГНСС" enabled={false} />
-            <ToggleRow label="БАРО" enabled />
+            <ToggleRow label="H=1500" enabled />
             <ToggleRow label="РВ" enabled />
             <ToggleRow label="ЦМР" enabled />
-            <ToggleRow label="КОНТУР" enabled />
+            <ToggleRow label="АЛГОРИТМ" enabled />
           </section>
         </aside>
 
@@ -1232,7 +1238,7 @@ export function App() {
                 currentElapsedS={currentElapsedS}
                 currentAglM={currentAglM}
               />
-              <AutopilotOutputPanel result={result} />
+              <AlgorithmOutputPanel result={result} />
               <ValidationPanel result={result} />
               <AlgorithmEventLog result={result} />
               <CorrelationSurface result={result} />

@@ -1,6 +1,6 @@
 # Чекпоинт: внешний NMEA-журнал PX4
 
-Цель проверки: показать, что режим `Журнал NMEA` принимает файл извне и запускает solver без `truthPath`, `trueSpeed`, `trueAzimuth` и сгенерированной истинной траектории.
+Цель проверки: показать, что режим `Проверочный журнал` принимает файл извне и запускает solver без `truthPath`, `trueSpeed`, `trueAzimuth` и сгенерированной истинной траектории.
 
 ## Вход
 
@@ -41,7 +41,7 @@ npm run nmea:analyze -- examples/px4-derived-radio-altimeter.nmea
 | ground_speed_mps | 41.0 |
 | azimuth_deg | 342 |
 | uncertainty_m | н/д |
-| course_correction_deg | н/д, потому что статус `NO FIX` |
+| compute_ms | время расчёта выводится в CLI/UI |
 
 ## Интерпретация
 

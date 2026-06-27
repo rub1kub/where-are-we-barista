@@ -715,7 +715,7 @@ export function FlightPreview3D({
       <div className="flight3d-stage">
         <canvas ref={canvasRef} data-testid="flight-preview-3d" />
         <div className="flight3d-hud">
-          <span>Барометр {Math.round(result.config.baroAltitudeM)} м</span>
+          <span>H MSL {Math.round(result.config.baroAltitudeM)} м</span>
           <span>Над землёй {Math.round(agl)} м</span>
           <span>Скорость {result.best.speedMps.toFixed(1)} м/с</span>
           <span>{result.truthAvailable ? "Стенд" : "Журнал НМЕА"}</span>

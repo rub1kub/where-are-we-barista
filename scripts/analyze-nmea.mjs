@@ -164,11 +164,11 @@ if (request.json) {
   console.log(\`зазор: \${output.ambiguity_margin}\`);
   console.log(\`СКО: \${output.profile_rmse_m} м\`);
   console.log(\`достоверность: \${output.confidence}\`);
+  console.log(\`время расчёта: \${output.compute_ms} мс\`);
   console.log(\`локально: X \${output.local_x_m} м / Y \${output.local_y_m} м\`);
   console.log(\`wgs84: \${output.lat}, \${output.lon}\`);
   console.log(\`Vпут: \${output.ground_speed_mps} м/с\`);
   console.log(\`азимут: \${output.azimuth_deg}°\`);
-  console.log(\`поправка курса: \${output.course_correction_deg === null ? "н/д" : output.course_correction_deg + "°"}\`);
   console.log(\`ЦМР: \${output.dem.source_name} / \${output.dem.grid.width}x\${output.dem.grid.height}\`);
 }
 `;

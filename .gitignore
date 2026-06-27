@@ -5,6 +5,7 @@ coverage/
 .DS_Store
 .playwright-mcp/
 .tmp/
+.codex-dev-server*.log
 *.local
 *.tsbuildinfo
 playwright-report/
