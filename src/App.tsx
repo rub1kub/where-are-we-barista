@@ -65,8 +65,10 @@ type CheckpointForm = {
 
 const MAP_WIDTH = 980;
 const MAP_HEIGHT = 560;
-const DEM_GRID_COLS = 128;
-const DEM_GRID_ROWS = 74;
+const MAP_RASTER_WIDTH = 980;
+const MAP_RASTER_HEIGHT = 560;
+const CONTOUR_GRID_COLS = 184;
+const CONTOUR_GRID_ROWS = 106;
 const PX4_DEMO_NMEA_URL = "/examples/px4-derived-radio-altimeter.nmea";
 const VANAVARA_CONTROL_NMEA_URL = "/examples/vanavara-success-radio-altimeter.nmea";
 const REPLAY_SPEED_OPTIONS = [30, 60, 120, 240] as const;
@@ -328,6 +330,13 @@ function scenarioIcon(id: ScenarioId): ReactNode {
   return <MapPinned size={18} />;
 }
 
+function scenarioKicker(id: ScenarioId): string {
+  if (id === "taiga") return "DEM GLO-30";
+  if (id === "mountain") return "контроль";
+  if (id === "flat") return "слабый рельеф";
+  return "отказ";
+}
+
 function ScenarioPanel({
   activeScenario,
   isLoading,
@@ -338,24 +347,32 @@ function ScenarioPanel({
   onSelect: (scenario: ScenarioId) => void;
 }) {
   const scenarios: ScenarioId[] = ["taiga", "mountain", "flat", "bad-log"];
+  const activeMeta = SCENARIO_META[activeScenario];
 
   return (
-    <section className="rail-panel scenario-panel">
-      <h2>Сценарии проверки</h2>
+    <section className="scenario-switcher">
+      <div className="scenario-switcher-head">
+        <div>
+          <span>Сценарии проверки</span>
+          <strong>{activeMeta.label}</strong>
+        </div>
+        <p>{scenarioKicker(activeScenario)} · {activeMeta.source}</p>
+      </div>
       <div className="scenario-grid" role="group" aria-label="Сценарии проверки">
         {scenarios.map((scenario) => {
           const meta = SCENARIO_META[scenario];
           return (
             <button
               key={scenario}
+              data-scenario={scenario}
               className={activeScenario === scenario ? "active" : ""}
               type="button"
               disabled={isLoading}
               onClick={() => onSelect(scenario)}
             >
-              {scenarioIcon(scenario)}
-              <span>{meta.label}</span>
-              <small>{meta.description}</small>
+              <i>{scenarioIcon(scenario)}</i>
+              <span>{meta.shortLabel}</span>
+              <small>{scenarioKicker(scenario)}</small>
             </button>
           );
         })}
@@ -545,39 +562,40 @@ type MapBounds = {
   maxY: number;
 };
 
-type ElevationCell = {
-  key: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  elevationM: number;
-  fill: string;
-  shadeFill: string;
-  shadeOpacity: number;
-};
-
 type ElevationContour = {
   key: string;
   d: string;
   emphasis: boolean;
 };
 
-function terrainColor(value: number, min: number, max: number) {
+type ElevationLayer = {
+  rasterDataUrl: string | null;
+  contours: ElevationContour[];
+  minElevationM: number;
+  maxElevationM: number;
+};
+
+type ElevationSampler = (localX: number, localY: number) => number | null;
+
+function terrainRgb(value: number, min: number, max: number): [number, number, number] {
   const t = clamp((value - min) / Math.max(1, max - min), 0, 1);
   const stops = [
-    { t: 0, rgb: [20, 72, 161] },
-    { t: 0.25, rgb: [14, 165, 183] },
-    { t: 0.48, rgb: [34, 197, 94] },
-    { t: 0.68, rgb: [234, 179, 8] },
-    { t: 0.86, rgb: [239, 68, 68] },
-    { t: 1, rgb: [254, 226, 226] },
+    { t: 0, rgb: [28, 64, 128] },
+    { t: 0.22, rgb: [43, 140, 118] },
+    { t: 0.48, rgb: [92, 146, 57] },
+    { t: 0.68, rgb: [201, 183, 73] },
+    { t: 0.86, rgb: [196, 112, 72] },
+    { t: 1, rgb: [232, 210, 174] },
   ];
   const nextIndex = Math.max(1, stops.findIndex((stop) => t <= stop.t));
   const a = stops[nextIndex - 1];
   const b = stops[nextIndex];
   const localT = (t - a.t) / Math.max(0.001, b.t - a.t);
-  const rgb = a.rgb.map((channel, index) => Math.round(channel + (b.rgb[index] - channel) * localT));
+  return a.rgb.map((channel, index) => Math.round(channel + (b.rgb[index] - channel) * localT)) as [number, number, number];
+}
+
+function terrainColor(value: number, min: number, max: number) {
+  const rgb = terrainRgb(value, min, max);
   return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
 }
 
@@ -613,6 +631,19 @@ function buildMapBounds(path: MatchPoint[]): MapBounds {
   return { minX, maxX, minY, maxY };
 }
 
+function copernicusDemLocalBounds(): MapBounds {
+  const metersPerDegreeLat = 111_320;
+  const metersPerDegreeLon = metersPerDegreeLat * Math.cos((TAIGA_ROUTE.start.lat * Math.PI) / 180);
+  const { bounds } = COPERNICUS_TAIGA_DEM;
+
+  return {
+    minX: (bounds.lonMin - TAIGA_ROUTE.start.lon) * metersPerDegreeLon,
+    maxX: (bounds.lonMax - TAIGA_ROUTE.start.lon) * metersPerDegreeLon,
+    minY: (bounds.latMin - TAIGA_ROUTE.start.lat) * metersPerDegreeLat,
+    maxY: (bounds.latMax - TAIGA_ROUTE.start.lat) * metersPerDegreeLat,
+  };
+}
+
 function localToMap(point: Pick<MatchPoint, "x" | "y">, bounds: MapBounds) {
   return {
     x: ((point.x - bounds.minX) / Math.max(1, bounds.maxX - bounds.minX)) * MAP_WIDTH,
@@ -620,52 +651,155 @@ function localToMap(point: Pick<MatchPoint, "x" | "y">, bounds: MapBounds) {
   };
 }
 
-function buildElevationCells(result: TerrainMatchResult, bounds: MapBounds): {
-  cells: ElevationCell[];
-  contours: ElevationContour[];
-  minElevationM: number;
-  maxElevationM: number;
-} {
-  const raw: { row: number; col: number; elevationM: number }[] = [];
+function buildTerrainRasterDataUrl(
+  sampler: ElevationSampler,
+  bounds: MapBounds,
+  width = MAP_RASTER_WIDTH,
+  height = MAP_RASTER_HEIGHT,
+): { dataUrl: string | null; minElevationM: number; maxElevationM: number } {
+  const elevations = new Float32Array(width * height);
+  const valid = new Uint8Array(width * height);
   let minElevationM = Number.POSITIVE_INFINITY;
   let maxElevationM = Number.NEGATIVE_INFINITY;
 
-  for (let row = 0; row < DEM_GRID_ROWS; row += 1) {
-    for (let col = 0; col < DEM_GRID_COLS; col += 1) {
-      const localX = bounds.minX + ((col + 0.5) / DEM_GRID_COLS) * (bounds.maxX - bounds.minX);
-      const localY = bounds.minY + ((DEM_GRID_ROWS - row - 0.5) / DEM_GRID_ROWS) * (bounds.maxY - bounds.minY);
-      const elevationM = terrainElevationMsl(result.config.terrainKind, localX, localY);
-      raw.push({ row, col, elevationM });
+  for (let row = 0; row < height; row += 1) {
+    for (let col = 0; col < width; col += 1) {
+      const localX = bounds.minX + ((col + 0.5) / width) * (bounds.maxX - bounds.minX);
+      const localY = bounds.minY + ((height - row - 0.5) / height) * (bounds.maxY - bounds.minY);
+      const elevationM = sampler(localX, localY);
+      const index = row * width + col;
+      if (elevationM === null || !Number.isFinite(elevationM)) continue;
+      elevations[index] = elevationM;
+      valid[index] = 1;
       minElevationM = Math.min(minElevationM, elevationM);
       maxElevationM = Math.max(maxElevationM, elevationM);
     }
   }
 
-  const cellWidth = MAP_WIDTH / DEM_GRID_COLS;
-  const cellHeight = MAP_HEIGHT / DEM_GRID_ROWS;
-  const byIndex = new Map(raw.map((cell) => [`${cell.row}-${cell.col}`, cell.elevationM]));
-  const elevationAt = (row: number, col: number) =>
-    byIndex.get(`${clamp(row, 0, DEM_GRID_ROWS - 1)}-${clamp(col, 0, DEM_GRID_COLS - 1)}`) ?? minElevationM;
+  if (!Number.isFinite(minElevationM) || !Number.isFinite(maxElevationM)) {
+    return { dataUrl: null, minElevationM: 0, maxElevationM: 0 };
+  }
+
+  if (typeof document === "undefined") {
+    return { dataUrl: null, minElevationM, maxElevationM };
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) return { dataUrl: null, minElevationM, maxElevationM };
+
+  const imageData = context.createImageData(width, height);
+  const shadeRadius = 5;
+  const elevationAt = (row: number, col: number, fallback: number) => {
+    const safeRow = clamp(row, 0, height - 1);
+    const safeCol = clamp(col, 0, width - 1);
+    const index = safeRow * width + safeCol;
+    return valid[index] ? elevations[index] : fallback;
+  };
+
+  for (let row = 0; row < height; row += 1) {
+    for (let col = 0; col < width; col += 1) {
+      const index = row * width + col;
+      const pixel = index * 4;
+      if (!valid[index]) {
+        imageData.data[pixel] = 12;
+        imageData.data[pixel + 1] = 18;
+        imageData.data[pixel + 2] = 18;
+        imageData.data[pixel + 3] = 255;
+        continue;
+      }
+
+      const elevationM = elevations[index];
+      const [baseR, baseG, baseB] = terrainRgb(elevationM, minElevationM, maxElevationM);
+      const west = elevationAt(row, col - shadeRadius, elevationM);
+      const east = elevationAt(row, col + shadeRadius, elevationM);
+      const north = elevationAt(row - shadeRadius, col, elevationM);
+      const south = elevationAt(row + shadeRadius, col, elevationM);
+      const diagonal = elevationAt(row - shadeRadius, col - shadeRadius, elevationM) - elevationAt(row + shadeRadius, col + shadeRadius, elevationM);
+      const slope = (west - east) * 0.014 + (south - north) * 0.018 + diagonal * 0.008;
+      const shade = clamp(0.82 + slope, 0.48, 1.26);
+      const relief = clamp((Math.abs(west - east) + Math.abs(south - north)) * 0.012, 0, 0.16);
+
+      imageData.data[pixel] = clamp(Math.round(baseR * shade + 255 * relief), 0, 255);
+      imageData.data[pixel + 1] = clamp(Math.round(baseG * shade + 244 * relief), 0, 255);
+      imageData.data[pixel + 2] = clamp(Math.round(baseB * shade + 220 * relief), 0, 255);
+      imageData.data[pixel + 3] = 255;
+    }
+  }
+
+  context.putImageData(imageData, 0, 0);
+  return { dataUrl: canvas.toDataURL("image/png"), minElevationM, maxElevationM };
+}
+
+function buildElevationContours(
+  sampler: ElevationSampler,
+  bounds: MapBounds,
+  minElevationM: number,
+  maxElevationM: number,
+): ElevationContour[] {
   const contourCount = 7;
   const contourStep = (maxElevationM - minElevationM) / contourCount;
   const contours: ElevationContour[] = [];
+  if (contourStep <= 0) return contours;
+
+  const cols = CONTOUR_GRID_COLS;
+  const rows = CONTOUR_GRID_ROWS;
+  const values = new Float32Array(cols * rows);
+  const xStep = MAP_WIDTH / (cols - 1);
+  const yStep = MAP_HEIGHT / (rows - 1);
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const localX = bounds.minX + (col / (cols - 1)) * (bounds.maxX - bounds.minX);
+      const localY = bounds.minY + ((rows - row - 1) / (rows - 1)) * (bounds.maxY - bounds.minY);
+      values[row * cols + col] = sampler(localX, localY) ?? minElevationM;
+    }
+  }
+
+  const valueAt = (row: number, col: number) => values[row * cols + col];
+  const interpolate = (level: number, a: number, b: number, ax: number, ay: number, bx: number, by: number) => {
+    const t = clamp((level - a) / Math.max(0.0001, b - a), 0, 1);
+    return {
+      x: ax + (bx - ax) * t,
+      y: ay + (by - ay) * t,
+    };
+  };
 
   for (let levelIndex = 1; levelIndex < contourCount; levelIndex += 1) {
     const level = minElevationM + contourStep * levelIndex;
     const segments: string[] = [];
-    for (let row = 0; row < DEM_GRID_ROWS - 1; row += 1) {
-      for (let col = 0; col < DEM_GRID_COLS - 1; col += 1) {
-        const current = elevationAt(row, col);
-        const right = elevationAt(row, col + 1);
-        const bottom = elevationAt(row + 1, col);
-        const x = col * cellWidth;
-        const y = row * cellHeight;
+    for (let row = 0; row < rows - 1; row += 1) {
+      for (let col = 0; col < cols - 1; col += 1) {
+        const v00 = valueAt(row, col);
+        const v10 = valueAt(row, col + 1);
+        const v11 = valueAt(row + 1, col + 1);
+        const v01 = valueAt(row + 1, col);
+        const x0 = col * xStep;
+        const x1 = (col + 1) * xStep;
+        const y0 = row * yStep;
+        const y1 = (row + 1) * yStep;
+        const points: { x: number; y: number }[] = [];
 
-        if ((current <= level && right > level) || (current > level && right <= level)) {
-          segments.push(`M ${(x + cellWidth).toFixed(1)} ${y.toFixed(1)} L ${(x + cellWidth).toFixed(1)} ${(y + cellHeight).toFixed(1)}`);
+        if ((v00 <= level && v10 > level) || (v00 > level && v10 <= level)) {
+          points.push(interpolate(level, v00, v10, x0, y0, x1, y0));
         }
-        if ((current <= level && bottom > level) || (current > level && bottom <= level)) {
-          segments.push(`M ${x.toFixed(1)} ${(y + cellHeight).toFixed(1)} L ${(x + cellWidth).toFixed(1)} ${(y + cellHeight).toFixed(1)}`);
+        if ((v10 <= level && v11 > level) || (v10 > level && v11 <= level)) {
+          points.push(interpolate(level, v10, v11, x1, y0, x1, y1));
+        }
+        if ((v01 <= level && v11 > level) || (v01 > level && v11 <= level)) {
+          points.push(interpolate(level, v01, v11, x0, y1, x1, y1));
+        }
+        if ((v00 <= level && v01 > level) || (v00 > level && v01 <= level)) {
+          points.push(interpolate(level, v00, v01, x0, y0, x0, y1));
+        }
+
+        if (points.length >= 2) {
+          segments.push(`M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)} L ${points[1].x.toFixed(1)} ${points[1].y.toFixed(1)}`);
+        }
+        if (points.length === 4) {
+          segments.push(`M ${points[2].x.toFixed(1)} ${points[2].y.toFixed(1)} L ${points[3].x.toFixed(1)} ${points[3].y.toFixed(1)}`);
         }
       }
     }
@@ -676,32 +810,20 @@ function buildElevationCells(result: TerrainMatchResult, bounds: MapBounds): {
     });
   }
 
+  return contours;
+}
+
+function buildElevationLayer(sampler: ElevationSampler, bounds: MapBounds): ElevationLayer {
+  const raster = buildTerrainRasterDataUrl(sampler, bounds);
+  const contours = raster.dataUrl
+    ? buildElevationContours(sampler, bounds, raster.minElevationM, raster.maxElevationM)
+    : [];
+
   return {
-    cells: raw.map((cell) => ({
-      key: `${cell.col}-${cell.row}`,
-      x: cell.col * cellWidth,
-      y: cell.row * cellHeight,
-      width: cellWidth + 0.4,
-      height: cellHeight + 0.4,
-      elevationM: cell.elevationM,
-      fill: terrainColor(cell.elevationM, minElevationM, maxElevationM),
-      shadeFill:
-        (elevationAt(cell.row, cell.col - 1) - elevationAt(cell.row, cell.col + 1)) * 0.012 +
-          (elevationAt(cell.row + 1, cell.col) - elevationAt(cell.row - 1, cell.col)) * 0.016 >= 0
-          ? "#ffffff"
-          : "#020617",
-      shadeOpacity: clamp(
-        Math.abs(
-          (elevationAt(cell.row, cell.col - 1) - elevationAt(cell.row, cell.col + 1)) * 0.012 +
-            (elevationAt(cell.row + 1, cell.col) - elevationAt(cell.row - 1, cell.col)) * 0.016,
-        ),
-        0,
-        0.34,
-      ),
-    })),
+    rasterDataUrl: raster.dataUrl,
     contours,
-    minElevationM,
-    maxElevationM,
+    minElevationM: raster.minElevationM,
+    maxElevationM: raster.maxElevationM,
   };
 }
 
@@ -762,10 +884,15 @@ function SatelliteMap({
     const mapPath = result.truthAvailable && result.truthPath.length > 1
       ? [...result.truthPath, ...result.estimatedPath]
       : result.estimatedPath;
-    const nextBounds = buildMapBounds(mapPath);
+    const nextBounds = result.config.terrainKind === "taiga"
+      ? copernicusDemLocalBounds()
+      : buildMapBounds(mapPath);
     return {
       bounds: nextBounds,
-      elevation: buildElevationCells(result, nextBounds),
+      elevation: buildElevationLayer(
+        (localX, localY) => terrainElevationMsl(result.config.terrainKind, localX, localY),
+        nextBounds,
+      ),
     };
   }, [result]);
   const start = basePath[0];
@@ -810,32 +937,15 @@ function SatelliteMap({
           </linearGradient>
         </defs>
         <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#12306f" />
-        <g className="elevation-cell-layer" filter="url(#terrainSmooth)">
-          {elevation.cells.map((cell) => (
-            <rect
-              key={cell.key}
-              x={cell.x}
-              y={cell.y}
-              width={cell.width}
-              height={cell.height}
-              fill={cell.fill}
-              className="elevation-cell"
-            />
-          ))}
-        </g>
-        <g className="elevation-shade-layer" filter="url(#terrainSmooth)">
-          {elevation.cells.map((cell) => (
-            <rect
-              key={`shade-${cell.key}`}
-              x={cell.x}
-              y={cell.y}
-              width={cell.width}
-              height={cell.height}
-              fill={cell.shadeFill}
-              opacity={cell.shadeOpacity}
-            />
-          ))}
-        </g>
+        {elevation.rasterDataUrl ? (
+          <image
+            className="terrain-raster"
+            href={elevation.rasterDataUrl}
+            width={MAP_WIDTH}
+            height={MAP_HEIGHT}
+            preserveAspectRatio="none"
+          />
+        ) : null}
         <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#elevationShade)" />
         <g className="elevation-contours">
           {elevation.contours.map((contour) => (
@@ -843,6 +953,7 @@ function SatelliteMap({
           ))}
         </g>
         {result.truthAvailable ? <path d={truthD} className="route-shadow" filter="url(#routeBlur)" /> : null}
+        <path d={estimateD} className="route-shadow estimate" filter="url(#routeBlur)" />
         {result.truthAvailable ? <path d={truthD} className="route-real-path" /> : null}
         <path d={estimateD} className="route-found-path" />
         <rect x={startPoint.x - 8} y={startPoint.y - 8} width="16" height="16" className="map-dot start" />
@@ -922,53 +1033,12 @@ function checkpointPath(points: CheckpointTrajectoryResult["points"], bounds: Ma
     .join(" ");
 }
 
-function buildCheckpointElevationCells(dem: CheckpointDem | null, bounds: MapBounds): {
-  cells: ElevationCell[];
-  minElevationM: number;
-  maxElevationM: number;
-} {
+function buildCheckpointElevationLayer(dem: CheckpointDem | null, bounds: MapBounds): ElevationLayer {
   if (!dem || !dem.bbox) {
-    return { cells: [], minElevationM: 0, maxElevationM: 0 };
+    return { rasterDataUrl: null, contours: [], minElevationM: 0, maxElevationM: 0 };
   }
 
-  const raw: { row: number; col: number; elevationM: number }[] = [];
-  let minElevationM = Number.POSITIVE_INFINITY;
-  let maxElevationM = Number.NEGATIVE_INFINITY;
-
-  for (let row = 0; row < DEM_GRID_ROWS; row += 1) {
-    for (let col = 0; col < DEM_GRID_COLS; col += 1) {
-      const localX = bounds.minX + ((col + 0.5) / DEM_GRID_COLS) * (bounds.maxX - bounds.minX);
-      const localY = bounds.minY + ((DEM_GRID_ROWS - row - 0.5) / DEM_GRID_ROWS) * (bounds.maxY - bounds.minY);
-      const elevationM = sampleCheckpointDem(dem, localX, localY);
-      if (elevationM === null) continue;
-      raw.push({ row, col, elevationM });
-      minElevationM = Math.min(minElevationM, elevationM);
-      maxElevationM = Math.max(maxElevationM, elevationM);
-    }
-  }
-
-  if (raw.length === 0) {
-    return { cells: [], minElevationM: 0, maxElevationM: 0 };
-  }
-
-  const cellWidth = MAP_WIDTH / DEM_GRID_COLS;
-  const cellHeight = MAP_HEIGHT / DEM_GRID_ROWS;
-
-  return {
-    cells: raw.map((cell) => ({
-      key: `checkpoint-${cell.col}-${cell.row}`,
-      x: cell.col * cellWidth,
-      y: cell.row * cellHeight,
-      width: cellWidth + 0.4,
-      height: cellHeight + 0.4,
-      elevationM: cell.elevationM,
-      fill: terrainColor(cell.elevationM, minElevationM, maxElevationM),
-      shadeFill: "#020617",
-      shadeOpacity: 0.08,
-    })),
-    minElevationM,
-    maxElevationM,
-  };
+  return buildElevationLayer((localX, localY) => sampleCheckpointDem(dem, localX, localY), bounds);
 }
 
 function CheckpointMap({
@@ -979,7 +1049,7 @@ function CheckpointMap({
   dem: CheckpointDem | null;
 }) {
   const bounds = useMemo(() => checkpointMapBounds(result), [result]);
-  const elevation = useMemo(() => buildCheckpointElevationCells(dem, bounds), [dem, bounds]);
+  const elevation = useMemo(() => buildCheckpointElevationLayer(dem, bounds), [dem, bounds]);
   const start = result.points[0];
   const finish = result.points[result.points.length - 1];
   const startPoint = localToMap(start, bounds);
@@ -1007,9 +1077,18 @@ function CheckpointMap({
           </filter>
         </defs>
         <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#07111b" />
-        <g className="elevation-cell-layer" filter="url(#checkpointTerrainSmooth)">
-          {elevation.cells.map((cell) => (
-            <rect key={cell.key} x={cell.x} y={cell.y} width={cell.width} height={cell.height} fill={cell.fill} />
+        {elevation.rasterDataUrl ? (
+          <image
+            className="terrain-raster"
+            href={elevation.rasterDataUrl}
+            width={MAP_WIDTH}
+            height={MAP_HEIGHT}
+            preserveAspectRatio="none"
+          />
+        ) : null}
+        <g className="elevation-contours">
+          {elevation.contours.map((contour) => (
+            <path key={`checkpoint-${contour.key}`} d={contour.d} className={contour.emphasis ? "emphasis" : ""} />
           ))}
         </g>
         <path d={checkpointPath(result.points, bounds)} className="route-shadow" filter="url(#checkpointRouteBlur)" />
@@ -1021,7 +1100,7 @@ function CheckpointMap({
         <text x="32" y="38" className="map-label">
           {dem ? `${dem.name} · ${dem.crsLabel}` : "GeoTIFF не загружен"}
         </text>
-        {elevation.cells.length > 0 ? (
+        {elevation.rasterDataUrl ? (
           <g className="elevation-range">
             <text x="32" y={MAP_HEIGHT - 58}>низины {formatNumber(elevation.minElevationM, 0)} м</text>
             <text x="32" y={MAP_HEIGHT - 38}>высоты {formatNumber(elevation.maxElevationM, 0)} м</text>
@@ -2013,8 +2092,6 @@ export function App() {
             />
           </section>
 
-          <ScenarioPanel activeScenario={activeScenario} isLoading={isLoadingNmea} onSelect={applyScenario} />
-
           <section className="rail-panel">
             <div className="rail-title">
               <h2>Режим входа</h2>
@@ -2127,6 +2204,7 @@ export function App() {
                 onReplayChange={handleReplayChange}
                 theme={theme}
               />
+              <ScenarioPanel activeScenario={activeScenario} isLoading={isLoadingNmea} onSelect={applyScenario} />
               <SatelliteMap result={result} currentPoint={currentPoint} scenario={activeScenario} />
               <div className="bottom-grid">
                 <NmeaStream result={result} currentIndex={currentIndex} />
