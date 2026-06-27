@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import {
   DEFAULT_MATCHER_CONFIG,
   TAIGA_ROUTE,
+  buildAutopilotOutputAtPoint,
   classifyNavigationStatus,
   localPointToWgs84,
   routeLengthM,
@@ -15,6 +16,7 @@ import {
   solveFromMeasuredProfile,
   solveFromNmea,
 } from "./terrainMatcher";
+import { COPERNICUS_TAIGA_DEM } from "./copernicusDemSample";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -43,6 +45,18 @@ function run() {
   const stream = parseNmeaStream(`${sentence}\n${buildGgaRadioSentence(13, 546.2)}`, 1500);
   assert(stream.length === 2, "NMEA stream parser should return every sentence");
 
+  assert(COPERNICUS_TAIGA_DEM.width === 420, "height map sample should keep expected width");
+  assert(COPERNICUS_TAIGA_DEM.height === 180, "height map sample should keep expected height");
+  assert(
+    COPERNICUS_TAIGA_DEM.elevationM.length === COPERNICUS_TAIGA_DEM.width * COPERNICUS_TAIGA_DEM.height,
+    "height map sample should contain one elevation per grid point",
+  );
+  assert(
+    COPERNICUS_TAIGA_DEM.maxElevationM - COPERNICUS_TAIGA_DEM.minElevationM > 300,
+    "height map sample should have a non-zero, visible elevation range",
+  );
+  assert(COPERNICUS_TAIGA_DEM.sourceUrls.length >= 1, "height map sample should keep open-source provenance URLs");
+
   const taiga = runTerrainMatching(DEFAULT_MATCHER_CONFIG);
   assert(TAIGA_ROUTE.start.lat > 59 && TAIGA_ROUTE.start.lon > 100, "demo route should be georeferenced in Siberian taiga");
   assert(taiga.nmea.length === taiga.samples.length, "matcher should keep NMEA and parsed sample counts aligned");
@@ -59,6 +73,34 @@ function run() {
   assert(
     taiga.autopilotOutput.courseCorrectionDeg !== null && Math.abs(taiga.autopilotOutput.courseCorrectionDeg) <= 0.2,
     "default planned route should produce near-zero course correction",
+  );
+  const firstAutopilotOutput = buildAutopilotOutputAtPoint(
+    taiga.estimatedPath[0],
+    taiga.best,
+    taiga.navigationStatus,
+    taiga.terrainStdM,
+    taiga.ambiguity,
+    taiga.config,
+  );
+  const finalAutopilotOutput = buildAutopilotOutputAtPoint(
+    taiga.estimatedPath[taiga.estimatedPath.length - 1],
+    taiga.best,
+    taiga.navigationStatus,
+    taiga.terrainStdM,
+    taiga.ambiguity,
+    taiga.config,
+  );
+  assert(
+    Math.hypot(
+      finalAutopilotOutput.localXM - firstAutopilotOutput.localXM,
+      finalAutopilotOutput.localYM - firstAutopilotOutput.localYM,
+    ) > 1000,
+    "live autopilot output should move with the current aircraft point",
+  );
+  assert(
+    Math.abs(finalAutopilotOutput.localXM - taiga.autopilotOutput.localXM) < 0.0001 &&
+      Math.abs(finalAutopilotOutput.localYM - taiga.autopilotOutput.localYM) < 0.0001,
+    "final live autopilot output should match the stored final package",
   );
 
   const finish = localPointToWgs84(taiga.estimatedPath[taiga.estimatedPath.length - 1]);
