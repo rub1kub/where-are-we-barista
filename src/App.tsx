@@ -6,12 +6,15 @@ import {
   Clock3,
   Gauge,
   MapPinned,
+  Monitor,
+  Moon,
   Pause,
   Play,
   RotateCcw,
   Satellite,
   Settings,
   Signal,
+  Sun,
 } from "lucide-react";
 import { FlightPreview3D, FlightReplayState } from "./FlightPreview3D";
 import { COPERNICUS_TAIGA_DEM } from "./copernicusDemSample";
@@ -31,6 +34,7 @@ type Config = typeof DEFAULT_MATCHER_CONFIG;
 type ViewMode = "operator" | "method";
 type InputMode = "simulation" | "nmea";
 type NmeaInputState = "empty" | "dirty" | "ready" | "error";
+type ThemeMode = "light" | "dark" | "system";
 
 const TILE_SIZE = 256;
 const MAP_WIDTH = 980;
@@ -819,7 +823,41 @@ function NoNavigationOutputPanel({ rawText, error }: { rawText: string; error: s
   );
 }
 
+function ThemeToggle({ theme, onChange }: { theme: ThemeMode; onChange: (t: ThemeMode) => void }) {
+  return (
+    <div className="theme-switcher" role="group" aria-label="Тема оформления">
+      <button type="button" className={theme === "light" ? "active" : ""} aria-label="Белая тема" onClick={() => onChange("light")}>
+        <Sun size={15} />
+      </button>
+      <button type="button" className={theme === "dark" ? "active" : ""} aria-label="Тёмная тема" onClick={() => onChange("dark")}>
+        <Moon size={15} />
+      </button>
+      <button type="button" className={theme === "system" ? "active" : ""} aria-label="Как система" onClick={() => onChange("system")}>
+        <Monitor size={15} />
+      </button>
+    </div>
+  );
+}
+
 export function App() {
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    return (localStorage.getItem("theme") as ThemeMode | null) ?? "dark";
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const resolved = theme === "system"
+      ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
+      : theme;
+    root.setAttribute("data-theme", resolved);
+    localStorage.setItem("theme", theme);
+    if (theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const handler = (e: MediaQueryListEvent) => root.setAttribute("data-theme", e.matches ? "light" : "dark");
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [theme]);
+
   const [config, setConfig] = useState<Config>(DEFAULT_MATCHER_CONFIG);
   const [mode, setMode] = useState<ViewMode>("operator");
   const [inputMode, setInputMode] = useState<InputMode>("simulation");
@@ -984,6 +1022,7 @@ export function App() {
         <div className="top-actions">
           <button className={mode === "operator" ? "active" : ""} type="button" onClick={() => setMode("operator")}>Оператор</button>
           <button className={mode === "method" ? "active" : ""} type="button" onClick={() => setMode("method")}>Методика</button>
+          <ThemeToggle theme={theme} onChange={setTheme} />
           <MiniButton
             icon={isReplayPaused ? <Play size={17} /> : <Pause size={17} />}
             label={isReplayPaused ? "Продолжить прокрутку" : "Пауза"}
