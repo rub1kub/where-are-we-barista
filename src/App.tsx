@@ -21,6 +21,17 @@ import {
 import { FlightPreview3D, FlightReplayState } from "./FlightPreview3D";
 import { COPERNICUS_TAIGA_DEM } from "./copernicusDemSample";
 import {
+  buildCheckpointDemoText,
+  buildCheckpointTrajectory,
+  checkpointResultToCsv,
+  createTaigaCheckpointDem,
+  loadCheckpointDemFromGeoTiff,
+  parseCheckpointHeights,
+  sampleCheckpointDem,
+  type CheckpointDem,
+  type CheckpointTrajectoryResult,
+} from "./checkpoint3";
+import {
   DEFAULT_MATCHER_CONFIG,
   FLAT_DEMO_CONFIG,
   MatchPoint,
@@ -38,10 +49,19 @@ import {
 } from "./terrainMatcher";
 
 type Config = typeof DEFAULT_MATCHER_CONFIG;
-type InputMode = "simulation" | "nmea";
+type InputMode = "simulation" | "nmea" | "checkpoint";
 type ScenarioId = "taiga" | "mountain" | "flat" | "bad-log";
 type NmeaInputState = "empty" | "dirty" | "ready" | "error";
 type ThemeMode = "light" | "dark" | "system";
+type CheckpointForm = {
+  startX: number;
+  startY: number;
+  azimuthDeg: number;
+  sampleDistanceM: number;
+  autoFitStep: boolean;
+  stepMinM: number;
+  stepMaxM: number;
+};
 
 const MAP_WIDTH = 980;
 const MAP_HEIGHT = 560;
@@ -294,6 +314,9 @@ function ModeSwitch({
       <button className={mode === "nmea" ? "active" : ""} type="button" onClick={() => onChange("nmea")}>
         Проверочный журнал
       </button>
+      <button className={mode === "checkpoint" ? "active" : ""} type="button" onClick={() => onChange("checkpoint")}>
+        Чекпоинт 3
+      </button>
     </div>
   );
 }
@@ -407,6 +430,110 @@ function NmeaImportPanel({
       </div>
       {error ? <p className="input-error">{error}</p> : null}
       {importedResult?.nmeaQuality.warning ? <p className="input-warning">{importedResult.nmeaQuality.warning}</p> : null}
+    </div>
+  );
+}
+
+function FieldNumber({
+  label,
+  value,
+  step = 1,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  step?: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="checkpoint-field">
+      <span>{label}</span>
+      <input
+        type="number"
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.currentTarget.value))}
+      />
+    </label>
+  );
+}
+
+function CheckpointImportPanel({
+  rawText,
+  form,
+  dem,
+  result,
+  error,
+  isLoadingDem,
+  onTextChange,
+  onHeightsFileChange,
+  onGeoTiffChange,
+  onFormChange,
+  onAnalyze,
+  onUseDemo,
+  onExportCsv,
+}: {
+  rawText: string;
+  form: CheckpointForm;
+  dem: CheckpointDem | null;
+  result: CheckpointTrajectoryResult | null;
+  error: string | null;
+  isLoadingDem: boolean;
+  onTextChange: (value: string) => void;
+  onHeightsFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onGeoTiffChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onFormChange: (patch: Partial<CheckpointForm>) => void;
+  onAnalyze: () => void;
+  onUseDemo: () => void;
+  onExportCsv: () => void;
+}) {
+  const lineCount = rawText.split(/\r?\n/).filter((row) => row.trim()).length;
+
+  return (
+    <div className="checkpoint-import">
+      <label htmlFor="checkpoint-heights">Высоты TXT, м</label>
+      <textarea
+        id="checkpoint-heights"
+        value={rawText}
+        onChange={(event) => onTextChange(event.currentTarget.value)}
+        spellCheck={false}
+        placeholder={"312.4\n313.1\n314.0"}
+      />
+      <div className="checkpoint-form-grid">
+        <FieldNumber label="Старт X" value={form.startX} onChange={(value) => onFormChange({ startX: value })} />
+        <FieldNumber label="Старт Y" value={form.startY} onChange={(value) => onFormChange({ startY: value })} />
+        <FieldNumber label="Азимут, °" value={form.azimuthDeg} onChange={(value) => onFormChange({ azimuthDeg: value })} />
+        <FieldNumber label="Шаг, м" value={form.sampleDistanceM} step={0.5} onChange={(value) => onFormChange({ sampleDistanceM: value })} />
+        <FieldNumber label="Мин. шаг" value={form.stepMinM} step={0.5} onChange={(value) => onFormChange({ stepMinM: value })} />
+        <FieldNumber label="Макс. шаг" value={form.stepMaxM} step={0.5} onChange={(value) => onFormChange({ stepMaxM: value })} />
+      </div>
+      <label className="checkpoint-check">
+        <input
+          type="checkbox"
+          checked={form.autoFitStep}
+          onChange={(event) => onFormChange({ autoFitStep: event.currentTarget.checked })}
+        />
+        <span>Автоподбор шага по GeoTIFF</span>
+      </label>
+      <div className="nmea-import-actions">
+        <label className="file-button">
+          TXT
+          <input accept=".txt,.csv,.log" type="file" onChange={onHeightsFileChange} />
+        </label>
+        <label className="file-button" aria-disabled={isLoadingDem}>
+          {isLoadingDem ? "Чтение…" : "GeoTIFF"}
+          <input accept=".tif,.tiff,.geotiff" type="file" onChange={onGeoTiffChange} disabled={isLoadingDem} />
+        </label>
+        <button type="button" onClick={onUseDemo}>Пример TXT</button>
+        <button className="primary" type="button" onClick={onAnalyze}>Рассчитать траекторию</button>
+        <button type="button" disabled={!result} onClick={onExportCsv}>CSV</button>
+      </div>
+      <div className="nmea-import-state">
+        <span>строк <b>{lineCount}</b></span>
+        <span>карта <b>{dem ? `${dem.width}x${dem.height}` : "нет"}</b></span>
+        <span>СК <b>{dem?.crsLabel ?? "нет"}</b></span>
+      </div>
+      {error ? <p className="input-error">{error}</p> : null}
     </div>
   );
 }
@@ -745,6 +872,166 @@ function SatelliteMap({
         <span>{scenarioMeta.region}</span>
         <span>{scenarioMeta.source}</span>
         <span>диапазон высот {formatNumber(elevation.minElevationM, 0)}-{formatNumber(elevation.maxElevationM, 0)} м</span>
+      </div>
+    </section>
+  );
+}
+
+function CheckpointStatusStrip({ result }: { result: CheckpointTrajectoryResult }) {
+  const status = result.status === "TRAJECTORY READY" ? "ok" : result.status === "PROFILE MISMATCH" ? "warn" : "bad";
+
+  return (
+    <section className="status-strip">
+      <div>
+        <span>Статус</span>
+        <strong className={status}>{result.status === "TRAJECTORY READY" ? "ТРАЕКТОРИЯ ГОТОВА" : result.status === "PROFILE MISMATCH" ? "ПРОФИЛЬ НЕ СОВПАЛ" : "НЕТ ЦМР"}</strong>
+      </div>
+      <div>
+        <span>точек</span>
+        <strong>{result.inputSamples}</strong>
+      </div>
+      <div>
+        <span>длина</span>
+        <strong>{formatMeters(result.routeLengthM)}</strong>
+      </div>
+      <div>
+        <span>шаг</span>
+        <strong>{formatNumber(result.sampleDistanceM, 1)} м</strong>
+      </div>
+      <div>
+        <span>Ошибка профиля</span>
+        <strong>{result.profileRmseM === null ? "н/д" : formatMeters(result.profileRmseM)}</strong>
+      </div>
+    </section>
+  );
+}
+
+function checkpointMapBounds(result: CheckpointTrajectoryResult): MapBounds {
+  const path = result.points.map((point) => ({ x: point.x, y: point.y, t: point.index, elevationM: point.measuredHeightM }));
+  return buildMapBounds(path);
+}
+
+function checkpointPath(points: CheckpointTrajectoryResult["points"], bounds: MapBounds): string {
+  const step = Math.max(1, Math.floor(points.length / 320));
+  return points
+    .filter((_, index) => index % step === 0 || index === points.length - 1)
+    .map((point, index) => {
+      const projected = localToMap(point, bounds);
+      return `${index === 0 ? "M" : "L"} ${projected.x.toFixed(1)} ${projected.y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function buildCheckpointElevationCells(dem: CheckpointDem | null, bounds: MapBounds): {
+  cells: ElevationCell[];
+  minElevationM: number;
+  maxElevationM: number;
+} {
+  if (!dem || !dem.bbox) {
+    return { cells: [], minElevationM: 0, maxElevationM: 0 };
+  }
+
+  const raw: { row: number; col: number; elevationM: number }[] = [];
+  let minElevationM = Number.POSITIVE_INFINITY;
+  let maxElevationM = Number.NEGATIVE_INFINITY;
+
+  for (let row = 0; row < DEM_GRID_ROWS; row += 1) {
+    for (let col = 0; col < DEM_GRID_COLS; col += 1) {
+      const localX = bounds.minX + ((col + 0.5) / DEM_GRID_COLS) * (bounds.maxX - bounds.minX);
+      const localY = bounds.minY + ((DEM_GRID_ROWS - row - 0.5) / DEM_GRID_ROWS) * (bounds.maxY - bounds.minY);
+      const elevationM = sampleCheckpointDem(dem, localX, localY);
+      if (elevationM === null) continue;
+      raw.push({ row, col, elevationM });
+      minElevationM = Math.min(minElevationM, elevationM);
+      maxElevationM = Math.max(maxElevationM, elevationM);
+    }
+  }
+
+  if (raw.length === 0) {
+    return { cells: [], minElevationM: 0, maxElevationM: 0 };
+  }
+
+  const cellWidth = MAP_WIDTH / DEM_GRID_COLS;
+  const cellHeight = MAP_HEIGHT / DEM_GRID_ROWS;
+
+  return {
+    cells: raw.map((cell) => ({
+      key: `checkpoint-${cell.col}-${cell.row}`,
+      x: cell.col * cellWidth,
+      y: cell.row * cellHeight,
+      width: cellWidth + 0.4,
+      height: cellHeight + 0.4,
+      elevationM: cell.elevationM,
+      fill: terrainColor(cell.elevationM, minElevationM, maxElevationM),
+      shadeFill: "#020617",
+      shadeOpacity: 0.08,
+    })),
+    minElevationM,
+    maxElevationM,
+  };
+}
+
+function CheckpointMap({
+  result,
+  dem,
+}: {
+  result: CheckpointTrajectoryResult;
+  dem: CheckpointDem | null;
+}) {
+  const bounds = useMemo(() => checkpointMapBounds(result), [result]);
+  const elevation = useMemo(() => buildCheckpointElevationCells(dem, bounds), [dem, bounds]);
+  const start = result.points[0];
+  const finish = result.points[result.points.length - 1];
+  const startPoint = localToMap(start, bounds);
+  const finishPoint = localToMap(finish, bounds);
+
+  return (
+    <section className="map-shell">
+      <div className="map-head">
+        <div>
+          <span>Чекпоинт 3</span>
+          <h2>Траектория по TXT-высотам</h2>
+        </div>
+        <div className="map-legend">
+          <span><i className="route-found" /> траектория</span>
+          <span><i className="elevation-high" /> карта высот</span>
+        </div>
+      </div>
+      <svg className="satellite-map elevation-map" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} role="img" aria-label="Траектория чекпоинта">
+        <defs>
+          <filter id="checkpointTerrainSmooth">
+            <feGaussianBlur stdDeviation="1.25" />
+          </filter>
+          <filter id="checkpointRouteBlur">
+            <feGaussianBlur stdDeviation="3" />
+          </filter>
+        </defs>
+        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#07111b" />
+        <g className="elevation-cell-layer" filter="url(#checkpointTerrainSmooth)">
+          {elevation.cells.map((cell) => (
+            <rect key={cell.key} x={cell.x} y={cell.y} width={cell.width} height={cell.height} fill={cell.fill} />
+          ))}
+        </g>
+        <path d={checkpointPath(result.points, bounds)} className="route-shadow" filter="url(#checkpointRouteBlur)" />
+        <path d={checkpointPath(result.points, bounds)} className="route-found-path" />
+        <rect x={startPoint.x - 8} y={startPoint.y - 8} width="16" height="16" className="map-dot start" />
+        <rect x={finishPoint.x - 10} y={finishPoint.y - 10} width="20" height="20" className="map-dot finish" />
+        <text x={startPoint.x + 14} y={startPoint.y - 12} className="map-label">старт</text>
+        <text x={finishPoint.x + 15} y={finishPoint.y + 5} className="map-label">финиш</text>
+        <text x="32" y="38" className="map-label">
+          {dem ? `${dem.name} · ${dem.crsLabel}` : "GeoTIFF не загружен"}
+        </text>
+        {elevation.cells.length > 0 ? (
+          <g className="elevation-range">
+            <text x="32" y={MAP_HEIGHT - 58}>низины {formatNumber(elevation.minElevationM, 0)} м</text>
+            <text x="32" y={MAP_HEIGHT - 38}>высоты {formatNumber(elevation.maxElevationM, 0)} м</text>
+          </g>
+        ) : null}
+      </svg>
+      <div className="map-foot">
+        <span>точек {result.inputSamples}</span>
+        <span>азимут {formatNumber(result.azimuthDeg, 0)}°</span>
+        <span>старт X {formatNumber(result.startX, 0)} / Y {formatNumber(result.startY, 0)}</span>
       </div>
     </section>
   );
@@ -1157,6 +1444,117 @@ function NoNavigationOutputPanel({ rawText, error }: { rawText: string; error: s
   );
 }
 
+function CheckpointOutputPanel({ result }: { result: CheckpointTrajectoryResult }) {
+  const final = result.points[result.points.length - 1];
+  const withGlobal = result.points.filter((point) => point.lat !== null && point.lon !== null).length;
+
+  return (
+    <section className="panel autopilot-panel">
+      <header>
+        <div>
+          <span>Выход чекпоинта</span>
+          <h3>Набор координат</h3>
+        </div>
+        <Signal size={22} />
+      </header>
+      <div className="output-grid">
+        <div>
+          <span>Точек</span>
+          <b>{result.inputSamples}</b>
+        </div>
+        <div>
+          <span>Шаг профиля</span>
+          <b>{formatNumber(result.sampleDistanceM, 1)} м</b>
+        </div>
+        <div>
+          <span>Финальный X</span>
+          <b>{formatNumber(final.x, 0)} м</b>
+        </div>
+        <div>
+          <span>Финальный Y</span>
+          <b>{formatNumber(final.y, 0)} м</b>
+        </div>
+        <div>
+          <span>Широта</span>
+          <b>{final.lat === null ? "н/д" : formatCoord(final.lat, "lat")}</b>
+        </div>
+        <div>
+          <span>Долгота</span>
+          <b>{final.lon === null ? "н/д" : formatCoord(final.lon, "lon")}</b>
+        </div>
+        <div>
+          <span>Ошибка профиля</span>
+          <b>{result.profileRmseM === null ? "н/д" : formatMeters(result.profileRmseM)}</b>
+        </div>
+        <div>
+          <span>Покрытие ЦМР</span>
+          <b>{formatNumber(result.coverageRatio * 100, 0)}%</b>
+        </div>
+        <div className="wide">
+          <span>Карта</span>
+          <b>{result.demName}</b>
+        </div>
+        <div className="wide">
+          <span>Глобальные координаты</span>
+          <b>{withGlobal > 0 ? `${withGlobal} точек` : "недоступны для этой СК"}</b>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CheckpointPointsPanel({ result }: { result: CheckpointTrajectoryResult }) {
+  const step = Math.max(1, Math.floor(result.points.length / 10));
+  const rows = result.points.filter((_, index) => index % step === 0 || index === result.points.length - 1).slice(0, 12);
+
+  return (
+    <section className="panel nmea-panel checkpoint-points">
+      <header>
+        <div>
+          <span>Точки траектории</span>
+          <h3>Локальные и WGS-84</h3>
+        </div>
+        <strong>{result.points.length}</strong>
+      </header>
+      <div className="checkpoint-table">
+        {rows.map((point) => (
+          <code key={point.index}>
+            #{point.index} X {point.x.toFixed(1)} Y {point.y.toFixed(1)}
+            {point.lat !== null && point.lon !== null ? ` · ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)}` : ""}
+          </code>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CheckpointAwaitingState({ rawText, error }: { rawText: string; error: string | null }) {
+  const lineCount = rawText.split(/\r?\n/).filter((row) => row.trim()).length;
+
+  return (
+    <section className="panel nmea-empty-panel">
+      <header>
+        <div>
+          <span>Чекпоинт 3</span>
+          <h3>{error ? "Расчёт отклонён" : "Траектория не рассчитана"}</h3>
+        </div>
+        <AlertTriangle size={22} />
+      </header>
+      <div className="nmea-empty-grid">
+        <div>
+          <span>строк TXT</span>
+          <b>{lineCount}</b>
+        </div>
+        <div>
+          <span>состояние</span>
+          <b>{error ? "ошибка" : lineCount > 0 ? "ожидает расчёт" : "нет входа"}</b>
+        </div>
+      </div>
+      <p>{error ?? "Загрузите TXT с высотами, укажите старт X/Y и азимут. GeoTIFF нужен для сверки профиля и визуализации карты высот."}</p>
+    </section>
+  );
+}
+
 function ThemeToggle({ theme, onChange }: { theme: ThemeMode; onChange: (t: ThemeMode) => void }) {
   return (
     <div className="theme-switcher" role="group" aria-label="Тема оформления">
@@ -1199,6 +1597,20 @@ export function App() {
   const [importedResult, setImportedResult] = useState<TerrainMatchResult | null>(null);
   const [nmeaError, setNmeaError] = useState<string | null>(null);
   const [isLoadingNmea, setLoadingNmea] = useState(false);
+  const [rawCheckpointHeights, setRawCheckpointHeights] = useState("");
+  const [checkpointDem, setCheckpointDem] = useState<CheckpointDem | null>(() => createTaigaCheckpointDem());
+  const [checkpointResult, setCheckpointResult] = useState<CheckpointTrajectoryResult | null>(null);
+  const [checkpointError, setCheckpointError] = useState<string | null>(null);
+  const [isLoadingDem, setLoadingDem] = useState(false);
+  const [checkpointForm, setCheckpointForm] = useState<CheckpointForm>({
+    startX: 0,
+    startY: 0,
+    azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
+    sampleDistanceM: DEFAULT_MATCHER_CONFIG.trueSpeedMps / DEFAULT_MATCHER_CONFIG.sampleRateHz,
+    autoFitStep: true,
+    stepMinM: 5,
+    stepMaxM: 90,
+  });
   const [replayState, setReplayState] = useState<FlightReplayState | null>(null);
   const [isReplayPaused, setReplayPaused] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1207,7 +1619,7 @@ export function App() {
   // Defer heavy terrain matching computation so slider thumb updates immediately.
   const deferredConfig = useDeferredValue(config);
   const simulationResult = useMemo(() => runTerrainMatching(deferredConfig), [deferredConfig]);
-  const result = inputMode === "nmea" ? importedResult : simulationResult;
+  const result = inputMode === "nmea" ? importedResult : inputMode === "simulation" ? simulationResult : null;
   const routeKm = result ? routeLengthM(result.truthAvailable ? result.truthPath : result.estimatedPath) / 1000 : 0;
   const cumulativeEstimateDistances = useMemo(() => result ? buildCumulativeDistances(result.estimatedPath) : [], [result]);
   const currentIndex = result
@@ -1265,6 +1677,19 @@ export function App() {
     setImportedResult(null);
     setNmeaError(null);
     setRawNmeaText("");
+    setCheckpointResult(null);
+    setCheckpointError(null);
+    setRawCheckpointHeights("");
+    setCheckpointDem(createTaigaCheckpointDem());
+    setCheckpointForm({
+      startX: 0,
+      startY: 0,
+      azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
+      sampleDistanceM: DEFAULT_MATCHER_CONFIG.trueSpeedMps / DEFAULT_MATCHER_CONFIG.sampleRateHz,
+      autoFitStep: true,
+      stepMinM: 5,
+      stepMaxM: 90,
+    });
   }
 
   function handleInputModeChange(nextMode: InputMode) {
@@ -1279,6 +1704,19 @@ export function App() {
     setInputMode("nmea");
   }
 
+  function handleCheckpointTextChange(value: string) {
+    setRawCheckpointHeights(value);
+    setCheckpointResult(null);
+    setCheckpointError(null);
+    setInputMode("checkpoint");
+  }
+
+  function updateCheckpointForm(patch: Partial<CheckpointForm>) {
+    setCheckpointForm((current) => ({ ...current, ...patch }));
+    setCheckpointResult(null);
+    setCheckpointError(null);
+  }
+
   async function loadNmeaFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
@@ -1287,6 +1725,35 @@ export function App() {
     setImportedResult(null);
     setNmeaError(null);
     setInputMode("nmea");
+  }
+
+  async function loadCheckpointHeightsFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setRawCheckpointHeights(text);
+    setCheckpointResult(null);
+    setCheckpointError(null);
+    setInputMode("checkpoint");
+  }
+
+  async function loadCheckpointGeoTiff(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    setInputMode("checkpoint");
+    setLoadingDem(true);
+    setCheckpointError(null);
+    try {
+      const dem = await loadCheckpointDemFromGeoTiff(file);
+      setCheckpointDem(dem);
+      setCheckpointResult(null);
+    } catch (error) {
+      setCheckpointDem(null);
+      setCheckpointResult(null);
+      setCheckpointError(error instanceof Error ? error.message : "Не удалось прочитать GeoTIFF.");
+    } finally {
+      setLoadingDem(false);
+    }
   }
 
   function useStandLog() {
@@ -1319,6 +1786,75 @@ export function App() {
 
   function analyzeNmeaLog() {
     solveNmeaText(rawNmeaText, config);
+  }
+
+  function analyzeCheckpoint() {
+    setInputMode("checkpoint");
+    try {
+      const heightsM = parseCheckpointHeights(rawCheckpointHeights);
+      const solved = buildCheckpointTrajectory({
+        heightsM,
+        dem: checkpointDem,
+        startX: checkpointForm.startX,
+        startY: checkpointForm.startY,
+        azimuthDeg: checkpointForm.azimuthDeg,
+        sampleDistanceM: checkpointForm.sampleDistanceM,
+        autoFitStep: checkpointForm.autoFitStep,
+        stepMinM: checkpointForm.stepMinM,
+        stepMaxM: checkpointForm.stepMaxM,
+      });
+      setCheckpointResult(solved);
+      setCheckpointError(null);
+    } catch (error) {
+      setCheckpointResult(null);
+      setCheckpointError(error instanceof Error ? error.message : "Не удалось рассчитать траекторию чекпоинта.");
+    }
+  }
+
+  function useCheckpointDemo() {
+    const text = buildCheckpointDemoText();
+    const nextForm: CheckpointForm = {
+      startX: 0,
+      startY: 0,
+      azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
+      sampleDistanceM: DEFAULT_MATCHER_CONFIG.trueSpeedMps / DEFAULT_MATCHER_CONFIG.sampleRateHz,
+      autoFitStep: true,
+      stepMinM: 5,
+      stepMaxM: 90,
+    };
+    const dem = createTaigaCheckpointDem();
+    setInputMode("checkpoint");
+    setCheckpointDem(dem);
+    setCheckpointForm(nextForm);
+    setRawCheckpointHeights(text);
+    try {
+      setCheckpointResult(buildCheckpointTrajectory({
+        heightsM: parseCheckpointHeights(text),
+        dem,
+        startX: nextForm.startX,
+        startY: nextForm.startY,
+        azimuthDeg: nextForm.azimuthDeg,
+        sampleDistanceM: nextForm.sampleDistanceM,
+        autoFitStep: nextForm.autoFitStep,
+        stepMinM: nextForm.stepMinM,
+        stepMaxM: nextForm.stepMaxM,
+      }));
+      setCheckpointError(null);
+    } catch (error) {
+      setCheckpointResult(null);
+      setCheckpointError(error instanceof Error ? error.message : "Не удалось подготовить пример TXT.");
+    }
+  }
+
+  function exportCheckpointCsv() {
+    if (!checkpointResult) return;
+    const blob = new Blob([checkpointResultToCsv(checkpointResult)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "krot-checkpoint-trajectory.csv";
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   async function applyScenario(scenario: ScenarioId) {
@@ -1528,7 +2064,7 @@ export function App() {
                   onChange={(value) => updateConfig("radioNoiseM", value)}
                 />
               </>
-            ) : (
+            ) : inputMode === "nmea" ? (
               <NmeaImportPanel
                 rawText={rawNmeaText}
                 error={nmeaError}
@@ -1540,6 +2076,22 @@ export function App() {
                 onUseStandLog={useStandLog}
                 onUseControlLog={useControlLog}
                 onUsePx4Log={usePx4Log}
+              />
+            ) : (
+              <CheckpointImportPanel
+                rawText={rawCheckpointHeights}
+                form={checkpointForm}
+                dem={checkpointDem}
+                result={checkpointResult}
+                error={checkpointError}
+                isLoadingDem={isLoadingDem}
+                onTextChange={handleCheckpointTextChange}
+                onHeightsFileChange={loadCheckpointHeightsFile}
+                onGeoTiffChange={loadCheckpointGeoTiff}
+                onFormChange={updateCheckpointForm}
+                onAnalyze={analyzeCheckpoint}
+                onUseDemo={useCheckpointDemo}
+                onExportCsv={exportCheckpointCsv}
               />
             )}
           </section>
@@ -1554,7 +2106,17 @@ export function App() {
         </aside>
 
         <section className="center-stage">
-          {result && currentPoint ? (
+          {inputMode === "checkpoint" ? (
+            checkpointResult ? (
+              <>
+                <CheckpointStatusStrip result={checkpointResult} />
+                <CheckpointMap result={checkpointResult} dem={checkpointDem} />
+                <CheckpointPointsPanel result={checkpointResult} />
+              </>
+            ) : (
+              <CheckpointAwaitingState rawText={rawCheckpointHeights} error={checkpointError} />
+            )
+          ) : result && currentPoint ? (
             <>
               <StatusStrip result={result} />
               <FlightPreview3D
@@ -1577,7 +2139,32 @@ export function App() {
         </section>
 
         <aside className="right-rail">
-          {result && currentPoint ? (
+          {inputMode === "checkpoint" ? (
+            checkpointResult ? (
+              <>
+                <CheckpointOutputPanel result={checkpointResult} />
+                <section className="panel facts-panel">
+                  <header>
+                    <div>
+                      <span>Проверка</span>
+                      <h3>Чекпоинт 3</h3>
+                    </div>
+                    <CheckCircle2 size={22} />
+                  </header>
+                  <div className="fact-list">
+                    <div><MapPinned size={17} /><span>Старт: <b>X {formatNumber(checkpointResult.startX, 0)} / Y {formatNumber(checkpointResult.startY, 0)}</b></span></div>
+                    <div><Gauge size={17} /><span>Азимут: <b>{formatNumber(checkpointResult.azimuthDeg, 0)}°</b></span></div>
+                    <div><Activity size={17} /><span>Покрытие ЦМР: <b>{formatNumber(checkpointResult.coverageRatio * 100, 0)}%</b></span></div>
+                    <div><Activity size={17} /><span>СКО профиля: <b>{checkpointResult.profileRmseM === null ? "н/д" : formatMeters(checkpointResult.profileRmseM)}</b></span></div>
+                    <div><Clock3 size={17} /><span>Режим: <b>TXT + GeoTIFF</b></span></div>
+                    <div><AlertTriangle size={17} /><span>Статус: <b>{checkpointResult.statusReason}</b></span></div>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <NoNavigationOutputPanel rawText={rawCheckpointHeights} error={checkpointError} />
+            )
+          ) : result && currentPoint ? (
             <>
               <SolutionPanel
                 result={result}

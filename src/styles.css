@@ -550,7 +550,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 /* ─── Mode switch ────────────────────────────────────────────────────────── */
 .mode-switch {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 6px;
   margin: 10px 0 8px;
 }
@@ -592,14 +592,18 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 }
 
 /* ─── NMEA import ────────────────────────────────────────────────────────── */
-.nmea-import {
+.nmea-import,
+.checkpoint-import {
   display: grid;
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid var(--glass-border-dim);
 }
 
-.nmea-import label {
+.nmea-import label,
+.checkpoint-import > label,
+.checkpoint-field span,
+.checkpoint-check {
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
@@ -607,7 +611,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   text-transform: uppercase;
 }
 
-.nmea-import textarea {
+.nmea-import textarea,
+.checkpoint-import textarea {
   width: 100%;
   min-height: 148px;
   resize: vertical;
@@ -628,6 +633,44 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   border-color: var(--accent-border-2);
   box-shadow: 0 0 0 3px var(--accent-faint);
 }
+
+.checkpoint-import textarea { min-height: 118px; }
+
+.checkpoint-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.checkpoint-field {
+  display: grid;
+  gap: 4px;
+}
+
+.checkpoint-field input {
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-input);
+  color: var(--text);
+  outline: none;
+}
+
+.checkpoint-field input:focus {
+  border-color: var(--accent-border-2);
+  box-shadow: 0 0 0 3px var(--accent-faint);
+}
+
+.checkpoint-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.checkpoint-check input { accent-color: var(--accent); }
 
 .nmea-import-actions {
   display: grid;
@@ -945,7 +988,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 /* ─── NMEA table ─────────────────────────────────────────────────────────── */
 .nmea-table { display: grid; gap: 4px; max-height: 232px; overflow: hidden; }
 
-.nmea-table code {
+.nmea-table code,
+.checkpoint-table code {
   display: block;
   padding: 4px 8px;
   border-radius: 4px;
@@ -954,6 +998,15 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   color: var(--ok);
   font-size: 11px;
   white-space: nowrap;
+}
+
+.checkpoint-points { min-height: 265px; }
+
+.checkpoint-table {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow: hidden;
 }
 
 /* ─── Charts ─────────────────────────────────────────────────────────────── */

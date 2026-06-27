@@ -19,6 +19,13 @@ import {
   solveFromNmea,
 } from "./terrainMatcher";
 import { COPERNICUS_TAIGA_DEM } from "./copernicusDemSample";
+import {
+  buildCheckpointDemoText,
+  buildCheckpointTrajectory,
+  checkpointResultToCsv,
+  createTaigaCheckpointDem,
+  parseCheckpointHeights,
+} from "./checkpoint3";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -80,6 +87,29 @@ function run() {
   assert(
     taiga.autopilotOutput.courseCorrectionDeg !== null && Math.abs(taiga.autopilotOutput.courseCorrectionDeg) <= 0.2,
     "default planned route should produce near-zero course correction",
+  );
+
+  const checkpointHeights = parseCheckpointHeights(buildCheckpointDemoText());
+  const checkpointResult = buildCheckpointTrajectory({
+    heightsM: checkpointHeights,
+    dem: createTaigaCheckpointDem(),
+    startX: 0,
+    startY: 0,
+    azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
+    sampleDistanceM: DEFAULT_MATCHER_CONFIG.trueSpeedMps / DEFAULT_MATCHER_CONFIG.sampleRateHz,
+    autoFitStep: true,
+    stepMinM: 5,
+    stepMaxM: 90,
+  });
+  assert(checkpointResult.inputSamples === checkpointHeights.length, "checkpoint TXT adapter should keep every height sample");
+  assert(checkpointResult.points.length === checkpointHeights.length, "checkpoint adapter should output one coordinate per height");
+  assert(checkpointResult.status === "TRAJECTORY READY", "checkpoint adapter should produce a ready trajectory on the Vanavara sample");
+  assert(Math.abs(checkpointResult.sampleDistanceM - 22) <= 1, "checkpoint adapter should recover the sample distance from DEM correlation");
+  assert(checkpointResult.profileRmseM !== null && checkpointResult.profileRmseM < 8, "checkpoint profile should match the DEM on the control sample");
+  assert(checkpointResult.points.some((point) => point.lat !== null && point.lon !== null), "checkpoint output should include global WGS-84 where available");
+  assert(
+    checkpointResultToCsv(checkpointResult).startsWith("index,distance_m,local_x,local_y,lat,lon"),
+    "checkpoint CSV export should include local and global coordinate columns",
   );
 
   const mountain = runTerrainMatching(MOUNTAIN_DEMO_CONFIG);

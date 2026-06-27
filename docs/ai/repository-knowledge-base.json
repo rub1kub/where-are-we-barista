@@ -19,7 +19,10 @@
     "inputs": [
       "постоянная высота MSL: 1500 м",
       "РВ AGL: радиовысота в NMEA-0183",
+      "для третьего чекпоинта: TXT с высотами по строкам",
       "карта высот: Copernicus DEM GLO-30 сэмпл района",
+      "для третьего чекпоинта: участок карты GeoTIFF",
+      "стартовая точка x,y и направление движения",
       "диапазон путевой скорости",
       "окно наблюдения"
     ],
@@ -85,6 +88,13 @@
       "successControlFixture": "examples/vanavara-success-radio-altimeter.nmea",
       "successControlMetadata": "examples/vanavara-success-radio-altimeter.meta.json",
       "negativeFixture": "examples/px4-derived-radio-altimeter.nmea"
+    },
+    "checkpoint3": {
+      "uiMode": "Чекпоинт 3",
+      "input": "TXT с высотами по строкам, GeoTIFF, старт X/Y, азимут",
+      "implementation": "src/checkpoint3.ts",
+      "output": "CSV и UI-таблица: index, distance_m, local_x, local_y, lat, lon, height_txt_m, height_dem_m, residual_m",
+      "notes": "локальные X/Y выдаются всегда; WGS-84 выдаётся только для WGS-84 GeoTIFF или встроенной Ванавары; для другой проекции нельзя подделывать lat/lon"
     }
   },
   "commands": {
@@ -157,7 +167,8 @@
     "src/copernicusDemSample.ts": "сгенерированная таблица высот Copernicus DEM",
     "scripts/generate-dem-sample.mjs": "загрузка COG-тайлов и генерация DEM-сэмпла",
     "src/nmeaRadioAltimeter.ts": "NMEA-0183 радиовысотомера",
-    "src/App.tsx": "операторский интерфейс и режим Методика",
+    "src/checkpoint3.ts": "адаптер TXT высот + GeoTIFF для третьего чекпоинта",
+    "src/App.tsx": "операторский интерфейс, режимы стенда, NMEA и чекпоинта 3",
     "src/FlightPreview3D.tsx": "Three.js сцена полёта БВС над тайгой",
     "src/styles.css": "тёмная квадратная инженерная тема",
     "src/smoke.test.ts": "smoke-проверки алгоритма",
@@ -166,7 +177,7 @@
   },
   "uiRules": {
     "defaultMode": "Оператор",
-    "secondaryMode": "Методика",
+    "secondaryMode": "нет отдельной страницы Методика; пояснения держать в README/docs",
     "visualStyle": "тёмная, квадратная, техническая, плотная панель",
     "allowedAbbreviations": [
       "NMEA",
@@ -199,12 +210,13 @@
       "проверить режим Оператор по умолчанию",
       "проверить видимый 3D canvas",
       "проверить карту маршрута",
-      "переключить Методика",
+      "переключить Чекпоинт 3",
       "проверить отсутствие console error/warn"
     ]
   },
   "knownRisks": [
     "DEM-сэмпл покрывает демонстрационный район, но не является полноценным тайловым DEM-движком для любого маршрута.",
+    "Режим третьего чекпоинта читает GeoTIFF в браузере, но WGS-84 lat/lon выдаёт только для WGS-84 или встроенного сэмпла; для проектных CRS нужен отдельный EPSG-преобразователь.",
     "Финальный проверочный NMEA-журнал радиовысотомера пока не получен; внешний успешный режим проверяется на synthetic control log по текущему DEM, а PX4-derived NMEA используется как negative NO FIX case.",
     "3D-превью показывает ход полёта по найденной траектории, но не является полноценным физическим авиасимулятором.",
     "Для бортового вычислителя потребуется профилирование и перенос тяжёлого перебора в WebWorker, WASM или отдельный нативный модуль.",
