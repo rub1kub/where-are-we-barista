@@ -24,13 +24,19 @@ function applyTheme3D(
   horizon: THREE.Mesh | null,
   ambient: THREE.HemisphereLight | null,
 ) {
-  const sky = isLight ? 0x87c5e8 : 0x071018;
+  const skyDark = 0x071018;
+  const skyLight = 0x87c5e8;
+  const sky = isLight ? skyLight : skyDark;
   scene.background = new THREE.Color(sky);
-  if (scene.fog instanceof THREE.FogExp2) scene.fog.color.set(sky);
-  if (horizon) (horizon.material as THREE.MeshBasicMaterial).color.set(isLight ? 0x87c5e8 : 0x10271c);
+  if (scene.fog instanceof THREE.FogExp2) {
+    scene.fog.color.set(sky);
+    scene.fog.density = isLight ? 0.068 : 0.072;
+  }
+  if (horizon) (horizon.material as THREE.MeshBasicMaterial).color.set(isLight ? 0x7ab8d8 : 0x0a1c14);
   if (ambient) {
     ambient.color.set(isLight ? 0xd4eeff : 0xc8f7e7);
     ambient.groundColor.set(isLight ? 0x6b9e5c : 0x17231c);
+    ambient.intensity = isLight ? 2.1 : 1.75;
   }
 }
 
@@ -300,11 +306,18 @@ function makeTerrainMesh(texture: THREE.Texture): THREE.Mesh {
   const geometry = new THREE.PlaneGeometry(SCENE_WIDTH, SCENE_DEPTH, TERRAIN_SEGMENTS_X, TERRAIN_SEGMENTS_Z);
   geometry.rotateX(-Math.PI / 2);
   const position = geometry.getAttribute("position") as THREE.BufferAttribute;
+  const halfW = SCENE_WIDTH / 2;
+  const halfD = SCENE_DEPTH / 2;
+  const edgeFloor = elevationToSceneY(COPERNICUS_TAIGA_DEM.minElevationM) - 0.18;
 
   for (let i = 0; i < position.count; i += 1) {
     const x = position.getX(i);
     const z = position.getZ(i);
-    position.setY(i, terrainYAtScene(x, z));
+    const nx = Math.abs(x) / halfW;
+    const nz = Math.abs(z) / halfD;
+    const edgeBlend = smoothstep(0.62, 1.0, Math.max(nx, nz));
+    const terrainY = terrainYAtScene(x, z);
+    position.setY(i, lerp(terrainY, edgeFloor, edgeBlend));
   }
 
   geometry.computeVertexNormals();
@@ -321,7 +334,7 @@ function makeTerrainMesh(texture: THREE.Texture): THREE.Mesh {
 }
 
 function makeHorizonPlane(): THREE.Mesh {
-  const geometry = new THREE.PlaneGeometry(SCENE_WIDTH * 2.4, SCENE_DEPTH * 2.25, 1, 1);
+  const geometry = new THREE.PlaneGeometry(SCENE_WIDTH * 5, SCENE_DEPTH * 5, 1, 1);
   geometry.rotateX(-Math.PI / 2);
   const mesh = new THREE.Mesh(
     geometry,
@@ -329,7 +342,7 @@ function makeHorizonPlane(): THREE.Mesh {
       color: 0x10271c,
     }),
   );
-  mesh.position.y = elevationToSceneY(COPERNICUS_TAIGA_DEM.minElevationM) - 0.08;
+  mesh.position.y = elevationToSceneY(COPERNICUS_TAIGA_DEM.minElevationM) - 0.2;
   return mesh;
 }
 
@@ -503,7 +516,7 @@ export function FlightPreview3D({
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x071018);
-    scene.fog = new THREE.FogExp2(0x071018, 0.055);
+    scene.fog = new THREE.FogExp2(0x071018, 0.072);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 120);
