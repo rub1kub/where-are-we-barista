@@ -168,6 +168,28 @@ export const DEFAULT_MATCHER_CONFIG: MatcherConfig = {
   speedStepMps: 1,
 };
 
+export const MOUNTAIN_DEMO_CONFIG: MatcherConfig = {
+  ...DEFAULT_MATCHER_CONFIG,
+  terrainKind: "mountain",
+  durationS: 5400,
+  trueSpeedMps: 50,
+  trueAzimuthDeg: 118,
+  plannedAzimuthDeg: 118,
+  radioNoiseM: 3,
+  speedMinMps: 46,
+  speedMaxMps: 54,
+};
+
+export const FLAT_DEMO_CONFIG: MatcherConfig = {
+  ...DEFAULT_MATCHER_CONFIG,
+  terrainKind: "flat",
+  durationS: 1200,
+  trueSpeedMps: 44,
+  trueAzimuthDeg: 73,
+  plannedAzimuthDeg: 73,
+  radioNoiseM: 0,
+};
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -255,7 +277,15 @@ export function terrainElevationMsl(kind: TerrainKind, x: number, y: number): nu
   }
 
   if (kind === "mountain") {
-    return 760 + longRidge * 180 + crossRidge * 120 + fine * 70 + gaussian(xKm, yKm, 72, 18, 22, 12, 190);
+    const alpineBasin =
+      gaussian(xKm, yKm, 42, 24, 16, 10, 210) -
+      gaussian(xKm, yKm, 84, 38, 20, 12, 150) +
+      gaussian(xKm, yKm, 125, 62, 18, 14, 260) -
+      gaussian(xKm, yKm, 162, 46, 14, 18, 130);
+    const asymmetricRidges =
+      Math.sin(xKm * 0.137 + yKm * 0.041) * 78 +
+      Math.cos(xKm * 0.028 + yKm * 0.171) * 64;
+    return 760 + longRidge * 180 + crossRidge * 120 + fine * 70 + asymmetricRidges + alpineBasin;
   }
 
   const copernicusElevation = sampleCopernicusTaigaDemMsl(x, y);
@@ -407,7 +437,7 @@ export function classifyNavigationStatus(
   if (ambiguity < 0.008) {
     return {
       navigationStatus: "FIX AMBIGUOUS",
-      statusReason: "Несколько кандидатов близки по corr: координата требует контроля.",
+      statusReason: "Несколько кандидатов близки по совпадению профилей: координата требует контроля.",
     };
   }
 

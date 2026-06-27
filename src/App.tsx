@@ -4,7 +4,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
+  GalleryVerticalEnd,
   Gauge,
+  Mountain,
   MapPinned,
   Monitor,
   Moon,
@@ -20,7 +22,9 @@ import { FlightPreview3D, FlightReplayState } from "./FlightPreview3D";
 import { COPERNICUS_TAIGA_DEM } from "./copernicusDemSample";
 import {
   DEFAULT_MATCHER_CONFIG,
+  FLAT_DEMO_CONFIG,
   MatchPoint,
+  MOUNTAIN_DEMO_CONFIG,
   NavigationStatus,
   TAIGA_ROUTE,
   TerrainMatchResult,
@@ -34,18 +38,66 @@ import {
 } from "./terrainMatcher";
 
 type Config = typeof DEFAULT_MATCHER_CONFIG;
-type ViewMode = "operator" | "method";
 type InputMode = "simulation" | "nmea";
+type ScenarioId = "taiga" | "mountain" | "flat" | "bad-log";
 type NmeaInputState = "empty" | "dirty" | "ready" | "error";
 type ThemeMode = "light" | "dark" | "system";
 
 const MAP_WIDTH = 980;
 const MAP_HEIGHT = 560;
-const DEM_GRID_COLS = 82;
-const DEM_GRID_ROWS = 46;
+const DEM_GRID_COLS = 128;
+const DEM_GRID_ROWS = 74;
 const PX4_DEMO_NMEA_URL = "/examples/px4-derived-radio-altimeter.nmea";
 const VANAVARA_CONTROL_NMEA_URL = "/examples/vanavara-success-radio-altimeter.nmea";
 const REPLAY_SPEED_OPTIONS = [30, 60, 120, 240] as const;
+
+const SCENARIO_CONFIGS: Record<Exclude<ScenarioId, "bad-log">, Config> = {
+  taiga: DEFAULT_MATCHER_CONFIG,
+  mountain: MOUNTAIN_DEMO_CONFIG,
+  flat: FLAT_DEMO_CONFIG,
+};
+
+const SCENARIO_META: Record<ScenarioId, {
+  label: string;
+  shortLabel: string;
+  description: string;
+  mapTitle: string;
+  region: string;
+  source: string;
+}> = {
+  taiga: {
+    label: "Тайга / Ванавара",
+    shortLabel: "Тайга",
+    description: "Основной реальный сэмпл карты высот Copernicus GLO-30.",
+    mapTitle: TAIGA_ROUTE.routeName,
+    region: TAIGA_ROUTE.region,
+    source: TAIGA_ROUTE.demName,
+  },
+  mountain: {
+    label: "Горный рельеф",
+    shortLabel: "Горы",
+    description: "Контрольный горный рельеф для проверки выраженных перепадов.",
+    mapTitle: "Контрольный горный рельеф",
+    region: "контрольный синтетический рельеф, не данные заказчика",
+    source: "контрольная карта высот / горный рельеф",
+  },
+  flat: {
+    label: "Равнина / озеро",
+    shortLabel: "Равнина",
+    description: "Слабый рельеф: доверие должно падать, координата не должна быть уверенной.",
+    mapTitle: "Равнина / озеро",
+    region: "контрольный слабый рельеф, не данные заказчика",
+    source: "контрольная карта высот / равнина и озеро",
+  },
+  "bad-log": {
+    label: "Несовместимый журнал",
+    shortLabel: "Отказ",
+    description: "Внешний журнал не соответствует текущей карте высот: ожидается отказ.",
+    mapTitle: "Несовместимый журнал",
+    region: "проверка отказа от ложной координаты",
+    source: "PX4-derived журнал + карта высот Ванавары",
+  },
+};
 
 function formatNumber(value: number, digits = 0): string {
   return value.toLocaleString("ru-RU", {
@@ -246,6 +298,49 @@ function ModeSwitch({
   );
 }
 
+function scenarioIcon(id: ScenarioId): ReactNode {
+  if (id === "mountain") return <Mountain size={18} />;
+  if (id === "flat") return <GalleryVerticalEnd size={18} />;
+  if (id === "bad-log") return <AlertTriangle size={18} />;
+  return <MapPinned size={18} />;
+}
+
+function ScenarioPanel({
+  activeScenario,
+  isLoading,
+  onSelect,
+}: {
+  activeScenario: ScenarioId;
+  isLoading: boolean;
+  onSelect: (scenario: ScenarioId) => void;
+}) {
+  const scenarios: ScenarioId[] = ["taiga", "mountain", "flat", "bad-log"];
+
+  return (
+    <section className="rail-panel scenario-panel">
+      <h2>Сценарии проверки</h2>
+      <div className="scenario-grid" role="group" aria-label="Сценарии проверки">
+        {scenarios.map((scenario) => {
+          const meta = SCENARIO_META[scenario];
+          return (
+            <button
+              key={scenario}
+              className={activeScenario === scenario ? "active" : ""}
+              type="button"
+              disabled={isLoading}
+              onClick={() => onSelect(scenario)}
+            >
+              {scenarioIcon(scenario)}
+              <span>{meta.label}</span>
+              <small>{meta.description}</small>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function NmeaImportPanel({
   rawText,
   error,
@@ -331,6 +426,14 @@ type ElevationCell = {
   height: number;
   elevationM: number;
   fill: string;
+  shadeFill: string;
+  shadeOpacity: number;
+};
+
+type ElevationContour = {
+  key: string;
+  d: string;
+  emphasis: boolean;
 };
 
 function terrainColor(value: number, min: number, max: number) {
@@ -392,10 +495,11 @@ function localToMap(point: Pick<MatchPoint, "x" | "y">, bounds: MapBounds) {
 
 function buildElevationCells(result: TerrainMatchResult, bounds: MapBounds): {
   cells: ElevationCell[];
+  contours: ElevationContour[];
   minElevationM: number;
   maxElevationM: number;
 } {
-  const raw = [];
+  const raw: { row: number; col: number; elevationM: number }[] = [];
   let minElevationM = Number.POSITIVE_INFINITY;
   let maxElevationM = Number.NEGATIVE_INFINITY;
 
@@ -412,6 +516,39 @@ function buildElevationCells(result: TerrainMatchResult, bounds: MapBounds): {
 
   const cellWidth = MAP_WIDTH / DEM_GRID_COLS;
   const cellHeight = MAP_HEIGHT / DEM_GRID_ROWS;
+  const byIndex = new Map(raw.map((cell) => [`${cell.row}-${cell.col}`, cell.elevationM]));
+  const elevationAt = (row: number, col: number) =>
+    byIndex.get(`${clamp(row, 0, DEM_GRID_ROWS - 1)}-${clamp(col, 0, DEM_GRID_COLS - 1)}`) ?? minElevationM;
+  const contourCount = 7;
+  const contourStep = (maxElevationM - minElevationM) / contourCount;
+  const contours: ElevationContour[] = [];
+
+  for (let levelIndex = 1; levelIndex < contourCount; levelIndex += 1) {
+    const level = minElevationM + contourStep * levelIndex;
+    const segments: string[] = [];
+    for (let row = 0; row < DEM_GRID_ROWS - 1; row += 1) {
+      for (let col = 0; col < DEM_GRID_COLS - 1; col += 1) {
+        const current = elevationAt(row, col);
+        const right = elevationAt(row, col + 1);
+        const bottom = elevationAt(row + 1, col);
+        const x = col * cellWidth;
+        const y = row * cellHeight;
+
+        if ((current <= level && right > level) || (current > level && right <= level)) {
+          segments.push(`M ${(x + cellWidth).toFixed(1)} ${y.toFixed(1)} L ${(x + cellWidth).toFixed(1)} ${(y + cellHeight).toFixed(1)}`);
+        }
+        if ((current <= level && bottom > level) || (current > level && bottom <= level)) {
+          segments.push(`M ${x.toFixed(1)} ${(y + cellHeight).toFixed(1)} L ${(x + cellWidth).toFixed(1)} ${(y + cellHeight).toFixed(1)}`);
+        }
+      }
+    }
+    contours.push({
+      key: `contour-${levelIndex}`,
+      d: segments.join(" "),
+      emphasis: levelIndex === Math.floor(contourCount / 2),
+    });
+  }
+
   return {
     cells: raw.map((cell) => ({
       key: `${cell.col}-${cell.row}`,
@@ -421,7 +558,21 @@ function buildElevationCells(result: TerrainMatchResult, bounds: MapBounds): {
       height: cellHeight + 0.4,
       elevationM: cell.elevationM,
       fill: terrainColor(cell.elevationM, minElevationM, maxElevationM),
+      shadeFill:
+        (elevationAt(cell.row, cell.col - 1) - elevationAt(cell.row, cell.col + 1)) * 0.012 +
+          (elevationAt(cell.row + 1, cell.col) - elevationAt(cell.row - 1, cell.col)) * 0.016 >= 0
+          ? "#ffffff"
+          : "#020617",
+      shadeOpacity: clamp(
+        Math.abs(
+          (elevationAt(cell.row, cell.col - 1) - elevationAt(cell.row, cell.col + 1)) * 0.012 +
+            (elevationAt(cell.row + 1, cell.col) - elevationAt(cell.row - 1, cell.col)) * 0.016,
+        ),
+        0,
+        0.34,
+      ),
     })),
+    contours,
     minElevationM,
     maxElevationM,
   };
@@ -469,7 +620,16 @@ function pointOnMap(point: MatchPoint, bounds: MapBounds) {
   return localToMap(point, bounds);
 }
 
-function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; currentPoint: MatchPoint }) {
+function SatelliteMap({
+  result,
+  currentPoint,
+  scenario,
+}: {
+  result: TerrainMatchResult;
+  currentPoint: MatchPoint;
+  scenario: ScenarioId;
+}) {
+  const scenarioMeta = SCENARIO_META[scenario];
   const basePath = result.truthAvailable && result.truthPath.length > 1 ? result.truthPath : result.estimatedPath;
   const { bounds, elevation } = useMemo(() => {
     const mapPath = result.truthAvailable && result.truthPath.length > 1
@@ -494,7 +654,7 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
       <div className="map-head">
         <div>
           <span>Карта высот + траектория</span>
-          <h2>{TAIGA_ROUTE.routeName}</h2>
+          <h2>{scenarioMeta.mapTitle}</h2>
         </div>
         <div className="map-legend">
           <span><i className="elevation-low" /> низины</span>
@@ -508,31 +668,51 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
           <filter id="routeBlur">
             <feGaussianBlur stdDeviation="3" />
           </filter>
+          <filter id="terrainSmooth">
+            <feGaussianBlur stdDeviation="1.25" />
+          </filter>
+          <linearGradient id="heightLegendGradient" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor={terrainColor(elevation.minElevationM, elevation.minElevationM, elevation.maxElevationM)} />
+            <stop offset="35%" stopColor={terrainColor((elevation.minElevationM + elevation.maxElevationM) / 2, elevation.minElevationM, elevation.maxElevationM)} />
+            <stop offset="100%" stopColor={terrainColor(elevation.maxElevationM, elevation.minElevationM, elevation.maxElevationM)} />
+          </linearGradient>
           <linearGradient id="elevationShade" x1="0" x2="1" y1="0" y2="1">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.2" />
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.16" />
             <stop offset="45%" stopColor="#000000" stopOpacity="0" />
-            <stop offset="100%" stopColor="#020617" stopOpacity="0.32" />
+            <stop offset="100%" stopColor="#020617" stopOpacity="0.38" />
           </linearGradient>
         </defs>
         <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#12306f" />
-        {elevation.cells.map((cell) => (
-          <rect
-            key={cell.key}
-            x={cell.x}
-            y={cell.y}
-            width={cell.width}
-            height={cell.height}
-            fill={cell.fill}
-            className="elevation-cell"
-          />
-        ))}
-        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#elevationShade)" />
-        <g className="map-grid-lines">
-          {Array.from({ length: 8 }, (_, index) => (
-            <line key={`v-${index}`} x1={(index + 1) * (MAP_WIDTH / 9)} x2={(index + 1) * (MAP_WIDTH / 9)} y1="0" y2={MAP_HEIGHT} />
+        <g className="elevation-cell-layer" filter="url(#terrainSmooth)">
+          {elevation.cells.map((cell) => (
+            <rect
+              key={cell.key}
+              x={cell.x}
+              y={cell.y}
+              width={cell.width}
+              height={cell.height}
+              fill={cell.fill}
+              className="elevation-cell"
+            />
           ))}
-          {Array.from({ length: 4 }, (_, index) => (
-            <line key={`h-${index}`} x1="0" x2={MAP_WIDTH} y1={(index + 1) * (MAP_HEIGHT / 5)} y2={MAP_HEIGHT / 5 * (index + 1)} />
+        </g>
+        <g className="elevation-shade-layer" filter="url(#terrainSmooth)">
+          {elevation.cells.map((cell) => (
+            <rect
+              key={`shade-${cell.key}`}
+              x={cell.x}
+              y={cell.y}
+              width={cell.width}
+              height={cell.height}
+              fill={cell.shadeFill}
+              opacity={cell.shadeOpacity}
+            />
+          ))}
+        </g>
+        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#elevationShade)" />
+        <g className="elevation-contours">
+          {elevation.contours.map((contour) => (
+            <path key={contour.key} d={contour.d} className={contour.emphasis ? "emphasis" : ""} />
           ))}
         </g>
         {result.truthAvailable ? <path d={truthD} className="route-shadow" filter="url(#routeBlur)" /> : null}
@@ -543,7 +723,7 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
         <circle cx={currentMapPoint.x} cy={currentMapPoint.y} r="11" className="map-current-pulse" />
         <circle cx={currentMapPoint.x} cy={currentMapPoint.y} r="6" className="map-current-dot" />
         <text x={startPoint.x + 14} y={startPoint.y - 12} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.startName : "старт оценки"}</text>
-        <text x={finishPoint.x + 15} y={finishPoint.y + 5} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.finishName : "оценка"}</text>
+        <text x={finishPoint.x + 15} y={finishPoint.y + 5} className="map-label">{result.truthAvailable ? SCENARIO_META[scenario].shortLabel : "оценка"}</text>
         <text x={currentMapPoint.x + 13} y={currentMapPoint.y - 11} className="map-label">текущая оценка</text>
         <text x={currentMapPoint.x + 13} y={currentMapPoint.y + 9} className="map-coordinate-label">
           X {formatNumber(currentPoint.x, 0)} м · Y {formatNumber(currentPoint.y, 0)} м
@@ -552,13 +732,19 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
           <text x="32" y="38">низины {formatNumber(elevation.minElevationM, 0)} м</text>
           <text x="32" y="58">высоты {formatNumber(elevation.maxElevationM, 0)} м</text>
         </g>
+        <g className="height-legend">
+          <rect x={MAP_WIDTH - 292} y={MAP_HEIGHT - 58} width="250" height="12" fill="url(#heightLegendGradient)" />
+          <text x={MAP_WIDTH - 292} y={MAP_HEIGHT - 24}>{formatNumber(elevation.minElevationM, 0)} м</text>
+          <text x={MAP_WIDTH - 176} y={MAP_HEIGHT - 24}>{formatNumber((elevation.minElevationM + elevation.maxElevationM) / 2, 0)} м</text>
+          <text x={MAP_WIDTH - 42} y={MAP_HEIGHT - 24} textAnchor="end">{formatNumber(elevation.maxElevationM, 0)} м</text>
+        </g>
         <text x="32" y={MAP_HEIGHT - 38} className="map-scale">0     25     50 км</text>
         <line x1="34" y1={MAP_HEIGHT - 25} x2="218" y2={MAP_HEIGHT - 25} className="scale-line" />
       </svg>
       <div className="map-foot">
-        <span>{TAIGA_ROUTE.region}</span>
-        <span>{TAIGA_ROUTE.demName}</span>
-        <span>диапазон высот {formatNumber(COPERNICUS_TAIGA_DEM.minElevationM, 0)}-{formatNumber(COPERNICUS_TAIGA_DEM.maxElevationM, 0)} м</span>
+        <span>{scenarioMeta.region}</span>
+        <span>{scenarioMeta.source}</span>
+        <span>диапазон высот {formatNumber(elevation.minElevationM, 0)}-{formatNumber(elevation.maxElevationM, 0)} м</span>
       </div>
     </section>
   );
@@ -576,7 +762,7 @@ function StatusStrip({ result }: { result: TerrainMatchResult }) {
         <strong>РВ + карта высот</strong>
       </div>
       <div>
-        <span>Совпадение</span>
+        <span>Совпадение профилей</span>
         <strong>{result.best.correlation.toFixed(3)}</strong>
       </div>
       <div>
@@ -584,7 +770,7 @@ function StatusStrip({ result }: { result: TerrainMatchResult }) {
         <strong>{formatMeters(result.best.rmseM)}</strong>
       </div>
       <div>
-        <span>доверие</span>
+        <span>Доверие к расчёту</span>
         <strong>{result.best.confidence}%</strong>
       </div>
     </section>
@@ -656,7 +842,7 @@ function SolutionPanel({
       ) : null}
       <div className="confidence">
         <div>
-          <span>Доверие</span>
+          <span>Доверие к расчёту</span>
           <strong>{confidence}%</strong>
         </div>
         <i><em style={{ width: `${confidence}%` }} /></i>
@@ -916,45 +1102,6 @@ function AlgorithmEventLog({ result }: { result: TerrainMatchResult }) {
   );
 }
 
-function MethodologyMode() {
-  return (
-    <section className="methodology">
-      <article>
-        <h2>Методика</h2>
-        <p>Этот режим нужен для защиты и трекеров. Основной экран остаётся операторской панелью.</p>
-      </article>
-      <article>
-        <strong>1. Радиовысотомер</strong>
-        <span>Радиовысотомер измеряет расстояние от борта до поверхности.</span>
-      </article>
-      <article>
-        <strong>2. Высота 1500 м</strong>
-        <span>В кейсе высота борта над уровнем моря постоянная: 1500 м MSL.</span>
-      </article>
-      <article>
-        <strong>3. Профиль</strong>
-        <span>Высота земли = 1500 м − Радиовысотомер. Так получается профиль рельефа вдоль трассы.</span>
-      </article>
-      <article>
-        <strong>4. Корреляция</strong>
-        <span>Система перебирает азимут 0-359° и скорость, затем ищет максимум совпадения.</span>
-      </article>
-      <article>
-        <strong>5. Проверочный журнал</strong>
-        <span>Внешний NMEA загружается в этот же контур: расчётная часть получает только РВ, высоту 1500 м и карту высот Copernicus GLO-30.</span>
-      </article>
-      <article>
-        <strong>6. 3D-реконструкция</strong>
-        <span>Превью не управляет расчётом: оно показывает текущую найденную траекторию, скорость и высоту над землёй из результата алгоритма.</span>
-      </article>
-      <article>
-        <strong>7. Шум РВ</strong>
-        <span>Стенд позволяет менять шум радиовысотомера и смотреть, как меняются corr, СКО, доверие и статус.</span>
-      </article>
-    </section>
-  );
-}
-
 function NmeaAwaitingState({ rawText, error }: { rawText: string; error: string | null }) {
   const lineCount = rawText.split(/\r?\n/).filter(Boolean).length;
   return (
@@ -1046,7 +1193,7 @@ export function App() {
   }, [theme]);
 
   const [config, setConfig] = useState<Config>(DEFAULT_MATCHER_CONFIG);
-  const [mode, setMode] = useState<ViewMode>("operator");
+  const [activeScenario, setActiveScenario] = useState<ScenarioId>("taiga");
   const [inputMode, setInputMode] = useState<InputMode>("simulation");
   const [rawNmeaText, setRawNmeaText] = useState("");
   const [importedResult, setImportedResult] = useState<TerrainMatchResult | null>(null);
@@ -1056,6 +1203,7 @@ export function App() {
   const [isReplayPaused, setReplayPaused] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [replaySpeedMultiplier, setReplaySpeedMultiplier] = useState(120);
+  const activeScenarioMeta = SCENARIO_META[activeScenario];
   // Defer heavy terrain matching computation so slider thumb updates immediately.
   const deferredConfig = useDeferredValue(config);
   const simulationResult = useMemo(() => runTerrainMatching(deferredConfig), [deferredConfig]);
@@ -1112,6 +1260,8 @@ export function App() {
 
   function reset() {
     setConfig(DEFAULT_MATCHER_CONFIG);
+    setActiveScenario("taiga");
+    setInputMode("simulation");
     setImportedResult(null);
     setNmeaError(null);
     setRawNmeaText("");
@@ -1142,22 +1292,22 @@ export function App() {
   function useStandLog() {
     const text = simulationResult.nmea.join("\n");
     setRawNmeaText(text);
-    solveNmeaText(text);
+    solveNmeaText(text, config);
   }
 
-  function solveNmeaText(text: string) {
+  function solveNmeaText(text: string, solverConfig: Config = config) {
     setInputMode("nmea");
     setImportedResult(null);
     try {
       const solved = solveFromNmea(text, {
-        terrainKind: config.terrainKind,
-        baroAltitudeM: config.baroAltitudeM,
-        sampleRateHz: config.sampleRateHz,
-        speedMinMps: config.speedMinMps,
-        speedMaxMps: config.speedMaxMps,
-        speedStepMps: config.speedStepMps,
-        plannedAzimuthDeg: config.plannedAzimuthDeg,
-        courseLookaheadM: config.courseLookaheadM,
+        terrainKind: solverConfig.terrainKind,
+        baroAltitudeM: solverConfig.baroAltitudeM,
+        sampleRateHz: solverConfig.sampleRateHz,
+        speedMinMps: solverConfig.speedMinMps,
+        speedMaxMps: solverConfig.speedMaxMps,
+        speedStepMps: solverConfig.speedStepMps,
+        plannedAzimuthDeg: solverConfig.plannedAzimuthDeg,
+        courseLookaheadM: solverConfig.courseLookaheadM,
       });
       setImportedResult(solved);
       setNmeaError(null);
@@ -1168,7 +1318,41 @@ export function App() {
   }
 
   function analyzeNmeaLog() {
-    solveNmeaText(rawNmeaText);
+    solveNmeaText(rawNmeaText, config);
+  }
+
+  async function applyScenario(scenario: ScenarioId) {
+    setActiveScenario(scenario);
+    setReplayState(null);
+
+    if (scenario !== "bad-log") {
+      const nextConfig = SCENARIO_CONFIGS[scenario];
+      setConfig(nextConfig);
+      setInputMode("simulation");
+      setImportedResult(null);
+      setNmeaError(null);
+      setRawNmeaText("");
+      return;
+    }
+
+    const nextConfig = DEFAULT_MATCHER_CONFIG;
+    setConfig(nextConfig);
+    setInputMode("nmea");
+    setImportedResult(null);
+    setNmeaError(null);
+    setLoadingNmea(true);
+    try {
+      const response = await fetch(PX4_DEMO_NMEA_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      setRawNmeaText(text);
+      solveNmeaText(text, nextConfig);
+    } catch {
+      setImportedResult(null);
+      setNmeaError("Не удалось загрузить несовместимый журнал из examples.");
+    } finally {
+      setLoadingNmea(false);
+    }
   }
 
   async function useControlLog() {
@@ -1180,8 +1364,10 @@ export function App() {
       const response = await fetch(VANAVARA_CONTROL_NMEA_URL, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const text = await response.text();
+      setActiveScenario("taiga");
+      setConfig(DEFAULT_MATCHER_CONFIG);
       setRawNmeaText(text);
-      solveNmeaText(text);
+      solveNmeaText(text, DEFAULT_MATCHER_CONFIG);
     } catch {
       setImportedResult(null);
       setNmeaError("Не удалось загрузить контрольный журнал Ванавары из examples.");
@@ -1199,8 +1385,10 @@ export function App() {
       const response = await fetch(PX4_DEMO_NMEA_URL, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const text = await response.text();
+      setActiveScenario("bad-log");
+      setConfig(DEFAULT_MATCHER_CONFIG);
       setRawNmeaText(text);
-      solveNmeaText(text);
+      solveNmeaText(text, DEFAULT_MATCHER_CONFIG);
     } catch {
       setImportedResult(null);
       setNmeaError("Не удалось загрузить PX4 пример из examples.");
@@ -1218,8 +1406,6 @@ export function App() {
         </div>
         <div className="top-status"><Signal size={15} /> РВ + 1500 М + КАРТА ВЫСОТ / КОРРЕЛЯЦИОННЫЙ ПОИСК</div>
         <div className="top-actions">
-          <button className={mode === "operator" ? "active" : ""} type="button" onClick={() => setMode("operator")}>Оператор</button>
-          <button className={mode === "method" ? "active" : ""} type="button" onClick={() => setMode("method")}>Методика</button>
           <ThemeToggle theme={theme} onChange={setTheme} />
           <MiniButton
             icon={isReplayPaused ? <Play size={17} /> : <Pause size={17} />}
@@ -1271,7 +1457,7 @@ export function App() {
             <h2>Входные данные</h2>
             <InputRow
               label="Карта высот"
-              value={TAIGA_ROUTE.demName}
+              value={activeScenarioMeta.source}
               help="Таблица высот земли по району. В рабочем контуре заменяется на Copernicus GLO-30, SRTM или ALOS."
             />
             <InputRow
@@ -1290,6 +1476,8 @@ export function App() {
               help="Диапазон перебора путевой скорости."
             />
           </section>
+
+          <ScenarioPanel activeScenario={activeScenario} isLoading={isLoadingNmea} onSelect={applyScenario} />
 
           <section className="rail-panel">
             <div className="rail-title">
@@ -1366,29 +1554,25 @@ export function App() {
         </aside>
 
         <section className="center-stage">
-          {mode === "operator" ? (
-            result && currentPoint ? (
-              <>
-                <StatusStrip result={result} />
-                <FlightPreview3D
-                  result={result}
-                  replayState={replayState}
-                  replaySpeedMultiplier={replaySpeedMultiplier}
-                  isReplayPaused={isReplayPaused}
-                  onReplayChange={handleReplayChange}
-                  theme={theme}
-                />
-                <SatelliteMap result={result} currentPoint={currentPoint} />
-                <div className="bottom-grid">
-                  <NmeaStream result={result} currentIndex={currentIndex} />
-                  <TerrainProfile result={result} />
-                </div>
-              </>
-            ) : (
-              <NmeaAwaitingState rawText={rawNmeaText} error={nmeaError} />
-            )
+          {result && currentPoint ? (
+            <>
+              <StatusStrip result={result} />
+              <FlightPreview3D
+                result={result}
+                replayState={replayState}
+                replaySpeedMultiplier={replaySpeedMultiplier}
+                isReplayPaused={isReplayPaused}
+                onReplayChange={handleReplayChange}
+                theme={theme}
+              />
+              <SatelliteMap result={result} currentPoint={currentPoint} scenario={activeScenario} />
+              <div className="bottom-grid">
+                <NmeaStream result={result} currentIndex={currentIndex} />
+                <TerrainProfile result={result} />
+              </div>
+            </>
           ) : (
-            <MethodologyMode />
+            <NmeaAwaitingState rawText={rawNmeaText} error={nmeaError} />
           )}
         </section>
 

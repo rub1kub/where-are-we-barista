@@ -7,6 +7,8 @@ import {
 import { readFileSync } from "node:fs";
 import {
   DEFAULT_MATCHER_CONFIG,
+  FLAT_DEMO_CONFIG,
+  MOUNTAIN_DEMO_CONFIG,
   TAIGA_ROUTE,
   buildAutopilotOutputAtPoint,
   classifyNavigationStatus,
@@ -72,9 +74,32 @@ function run() {
   assert(taiga.best.confidence >= 70, "taiga route should produce useful confidence");
   assert(taiga.autopilotOutput.fixUsable, "valid/degraded stand result should be marked usable for navigation output");
   assert(
+    taiga.navigationStatus === "FIX VALID" || taiga.navigationStatus === "FIX DEGRADED",
+    "Vanavara scenario should produce a usable navigation result",
+  );
+  assert(
     taiga.autopilotOutput.courseCorrectionDeg !== null && Math.abs(taiga.autopilotOutput.courseCorrectionDeg) <= 0.2,
     "default planned route should produce near-zero course correction",
   );
+
+  const mountain = runTerrainMatching(MOUNTAIN_DEMO_CONFIG);
+  assert(
+    mountain.navigationStatus === "FIX VALID" || mountain.navigationStatus === "FIX DEGRADED",
+    "mountain scenario should produce a usable navigation result",
+  );
+  assert(mountain.autopilotOutput.fixUsable, "mountain scenario should expose a usable navigation output");
+  assert(mountain.terrainReliefM > taiga.terrainReliefM, "mountain scenario should have more expressive relief than Vanavara");
+  assert(mountain.best.correlation > 0.95, "mountain scenario should produce a strong profile match");
+
+  const flatScenario = runTerrainMatching(FLAT_DEMO_CONFIG);
+  assert(
+    flatScenario.navigationStatus === "LOW RELIEF" ||
+      flatScenario.navigationStatus === "FIX AMBIGUOUS" ||
+      flatScenario.navigationStatus === "NO FIX",
+    "plain/lake scenario should not report a confident coordinate",
+  );
+  assert(!flatScenario.autopilotOutput.fixUsable, "plain/lake scenario should not expose a usable navigation output");
+  assert(flatScenario.best.confidence < taiga.best.confidence, "plain/lake scenario should lower confidence versus Vanavara");
   const firstAutopilotOutput = buildAutopilotOutputAtPoint(
     taiga.estimatedPath[0],
     taiga.best,
@@ -189,6 +214,7 @@ function run() {
   assert(px4Imported.samples.length === 1690, "PX4-derived external NMEA fixture should keep every imported sentence");
   assert(px4Imported.nmeaQuality.checksumInvalid === 0, "PX4-derived external NMEA fixture should pass checksum policy");
   assert(px4Imported.events.some((event) => event.code === "RA_STREAM_STARTED"), "PX4-derived import should produce algorithm events");
+  assert(px4Imported.navigationStatus === "NO FIX", "incompatible external journal should produce NO FIX");
   assert(px4Imported.autopilotOutput.courseCorrectionDeg === null, "PX4-derived NO FIX import should not expose course correction");
   assert(!px4Imported.autopilotOutput.fixUsable, "PX4-derived NO FIX import should not expose a usable navigation output");
 

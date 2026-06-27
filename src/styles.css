@@ -607,6 +607,64 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   box-shadow: var(--accent-glow);
 }
 
+/* ─── Scenario selector ─────────────────────────────────────────────────── */
+.scenario-panel { display: grid; gap: 10px; }
+
+.scenario-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.scenario-grid button {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 9px;
+  min-height: 54px;
+  padding: 9px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-2);
+  color: var(--text);
+  text-align: left;
+  transition: background var(--t), border-color var(--t), color var(--t), box-shadow var(--t);
+}
+
+.scenario-grid button:hover {
+  border-color: var(--glass-border-2);
+  background: var(--glass-bg-3);
+}
+
+.scenario-grid button.active {
+  border-color: var(--accent-border-2);
+  background: var(--accent-soft);
+  box-shadow: var(--accent-glow);
+}
+
+.scenario-grid button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.scenario-grid svg {
+  grid-row: 1 / span 2;
+  color: var(--accent);
+}
+
+.scenario-grid span {
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scenario-grid small {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
 /* ─── NMEA import ────────────────────────────────────────────────────────── */
 .nmea-import {
   display: grid;
@@ -850,11 +908,25 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   box-shadow: inset 0 0 90px rgba(2, 6, 23, 0.46);
 }
 
-.elevation-cell { shape-rendering: crispEdges; }
+.elevation-cell-layer,
+.elevation-shade-layer { opacity: 0.98; }
 
-.map-grid-lines line {
-  stroke: rgba(255, 255, 255, 0.1);
-  stroke-width: 1;
+.elevation-cell { shape-rendering: geometricPrecision; }
+
+.elevation-shade-layer { mix-blend-mode: soft-light; }
+
+.elevation-contours path {
+  fill: none;
+  stroke: rgba(245, 255, 252, 0.24);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.elevation-contours path.emphasis {
+  stroke: rgba(255, 255, 255, 0.36);
+  stroke-width: 1.35;
 }
 
 /* ─── SVG map elements ───────────────────────────────────────────────────── */
@@ -863,7 +935,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .route-real-path {
   fill: none;
   stroke: var(--route-blue);
-  stroke-width: 4.5;
+  stroke-width: 5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -871,7 +943,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .route-found-path {
   fill: none;
   stroke: var(--route-green);
-  stroke-width: 3.5;
+  stroke-width: 4.5;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 9 8;
@@ -894,7 +966,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .map-label,
 .map-scale,
 .map-coordinate-label,
-.elevation-range text {
+.elevation-range text,
+.height-legend text {
   fill: #f4fffd;
   paint-order: stroke;
   stroke: rgba(0,0,0,0.65);
@@ -906,15 +979,21 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 [data-theme="light"] .map-label,
 [data-theme="light"] .map-scale,
 [data-theme="light"] .map-coordinate-label,
-[data-theme="light"] .elevation-range text { fill: #0f172a; stroke: rgba(255,255,255,0.75); }
+[data-theme="light"] .elevation-range text,
+[data-theme="light"] .height-legend text { fill: #0f172a; stroke: rgba(255,255,255,0.75); }
 
 .map-scale { font-size: 11px; font-weight: 600; }
 .map-coordinate-label,
-.elevation-range text {
+.elevation-range text,
+.height-legend text {
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+.height-legend rect {
+  stroke: rgba(255, 255, 255, 0.42);
+  stroke-width: 1;
 }
 .scale-line { stroke: #f4fffd; stroke-width: 2.5; }
 [data-theme="light"] .scale-line { stroke: #0f172a; }
@@ -1329,29 +1408,6 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 }
 
 .right-rail .dem-provenance small { line-height: 1.3; }
-
-/* ─── Methodology ────────────────────────────────────────────────────────── */
-.methodology { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-
-.methodology article {
-  min-height: 120px;
-  padding: 18px;
-  border-radius: 10px;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-  box-shadow: var(--shadow-sm);
-}
-
-.methodology article:first-child { grid-column: 1 / -1; min-height: 100px; }
-
-.methodology h2 { margin: 0; color: var(--text-2); font-size: 32px; font-weight: 200; line-height: 1.05; }
-
-.methodology p,
-.methodology span { display: block; margin: 8px 0 0; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
-
-.methodology strong { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 
 /* ─── 3D flight panel ────────────────────────────────────────────────────── */
 .flight3d-panel header strong { font-size: 18px; }
