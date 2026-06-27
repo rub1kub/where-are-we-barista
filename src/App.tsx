@@ -30,31 +30,22 @@ import {
   routeLengthM,
   runTerrainMatching,
   solveFromNmea,
+  terrainElevationMsl,
 } from "./terrainMatcher";
 
 type Config = typeof DEFAULT_MATCHER_CONFIG;
 type ViewMode = "operator" | "method";
 type InputMode = "simulation" | "nmea";
-type MapViewMode = "height" | "satellite" | "hybrid";
 type NmeaInputState = "empty" | "dirty" | "ready" | "error";
 type ThemeMode = "light" | "dark" | "system";
 
-const TILE_SIZE = 256;
 const MAP_WIDTH = 980;
 const MAP_HEIGHT = 560;
-const HEIGHT_MAP_COLS = 98;
-const HEIGHT_MAP_ROWS = 56;
-const CONTOUR_STEP_M = 50;
+const DEM_GRID_COLS = 82;
+const DEM_GRID_ROWS = 46;
 const PX4_DEMO_NMEA_URL = "/examples/px4-derived-radio-altimeter.nmea";
 const VANAVARA_CONTROL_NMEA_URL = "/examples/vanavara-success-radio-altimeter.nmea";
 const REPLAY_SPEED_OPTIONS = [30, 60, 120, 240] as const;
-const HEIGHT_COLOR_STOPS = [
-  { t: 0, color: [19, 49, 31] },
-  { t: 0.3, color: [53, 91, 43] },
-  { t: 0.58, color: [119, 104, 50] },
-  { t: 0.78, color: [168, 132, 78] },
-  { t: 1, color: [231, 222, 190] },
-] as const;
 
 function formatNumber(value: number, digits = 0): string {
   return value.toLocaleString("ru-RU", {
@@ -93,29 +84,6 @@ function formatMetric(value: number | null, digits = 0, unit = ""): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-function mix(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-function mixRgb(a: readonly number[], b: readonly number[], t: number): number[] {
-  return [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)];
-}
-
-function heightColor(elevationM: number, shade: number): string {
-  const t = clamp(
-    (elevationM - COPERNICUS_TAIGA_DEM.minElevationM) /
-      Math.max(1, COPERNICUS_TAIGA_DEM.maxElevationM - COPERNICUS_TAIGA_DEM.minElevationM),
-    0,
-    1,
-  );
-  const upperIndex = Math.max(1, HEIGHT_COLOR_STOPS.findIndex((stop) => stop.t >= t));
-  const lower = HEIGHT_COLOR_STOPS[upperIndex - 1];
-  const upper = HEIGHT_COLOR_STOPS[upperIndex] ?? lower;
-  const localT = (t - lower.t) / Math.max(0.001, upper.t - lower.t);
-  const color = mixRgb(lower.color, upper.color, localT).map((channel) => Math.round(clamp(channel * shade, 0, 255)));
-  return `rgb(${color[0]} ${color[1]} ${color[2]})`;
 }
 
 function statusClass(status: NavigationStatus): string {
@@ -348,213 +316,178 @@ function NmeaImportPanel({
   );
 }
 
-function tileProject(lat: number, lon: number, zoom: number) {
-  const scale = 2 ** zoom;
-  const x = ((lon + 180) / 360) * scale;
-  const latRad = (lat * Math.PI) / 180;
-  const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale;
-  return { x, y };
-}
+type MapBounds = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+};
 
-function tileToLatLon(x: number, y: number, zoom: number) {
-  const scale = 2 ** zoom;
-  const lon = (x / scale) * 360 - 180;
-  const n = Math.PI - (2 * Math.PI * y) / scale;
-  const lat = (Math.atan(Math.sinh(n)) * 180) / Math.PI;
-  return { lat, lon };
-}
-
-function mapPixelToWgs84(x: number, y: number, center: { x: number; y: number }, zoom: number) {
-  return tileToLatLon(
-    center.x + (x - MAP_WIDTH / 2) / TILE_SIZE,
-    center.y + (y - MAP_HEIGHT / 2) / TILE_SIZE,
-    zoom,
-  );
-}
-
-function sampleDemAtLatLon(lat: number, lon: number): number | null {
-  const { bounds, width, height, elevationM } = COPERNICUS_TAIGA_DEM;
-  if (lat < bounds.latMin || lat > bounds.latMax || lon < bounds.lonMin || lon > bounds.lonMax) {
-    return null;
-  }
-
-  const px = ((lon - bounds.lonMin) / (bounds.lonMax - bounds.lonMin)) * (width - 1);
-  const py = ((bounds.latMax - lat) / (bounds.latMax - bounds.latMin)) * (height - 1);
-  const x0 = clamp(Math.floor(px), 0, width - 1);
-  const y0 = clamp(Math.floor(py), 0, height - 1);
-  const x1 = clamp(x0 + 1, 0, width - 1);
-  const y1 = clamp(y0 + 1, 0, height - 1);
-  const tx = px - x0;
-  const ty = py - y0;
-  const i00 = y0 * width + x0;
-  const i10 = y0 * width + x1;
-  const i01 = y1 * width + x0;
-  const i11 = y1 * width + x1;
-  const top = elevationM[i00] * (1 - tx) + elevationM[i10] * tx;
-  const bottom = elevationM[i01] * (1 - tx) + elevationM[i11] * tx;
-  return top * (1 - ty) + bottom * ty;
-}
-
-type HeightMapCell = {
+type ElevationCell = {
   key: string;
-  row: number;
-  col: number;
   x: number;
   y: number;
   width: number;
   height: number;
-  elevationM: number | null;
+  elevationM: number;
   fill: string;
 };
 
-function buildHeightMapCells(center: { x: number; y: number }, zoom: number): HeightMapCell[] {
-  const cells: HeightMapCell[] = [];
-  const cellW = MAP_WIDTH / HEIGHT_MAP_COLS;
-  const cellH = MAP_HEIGHT / HEIGHT_MAP_ROWS;
+function terrainColor(value: number, min: number, max: number) {
+  const t = clamp((value - min) / Math.max(1, max - min), 0, 1);
+  const stops = [
+    { t: 0, rgb: [20, 72, 161] },
+    { t: 0.25, rgb: [14, 165, 183] },
+    { t: 0.48, rgb: [34, 197, 94] },
+    { t: 0.68, rgb: [234, 179, 8] },
+    { t: 0.86, rgb: [239, 68, 68] },
+    { t: 1, rgb: [254, 226, 226] },
+  ];
+  const nextIndex = Math.max(1, stops.findIndex((stop) => t <= stop.t));
+  const a = stops[nextIndex - 1];
+  const b = stops[nextIndex];
+  const localT = (t - a.t) / Math.max(0.001, b.t - a.t);
+  const rgb = a.rgb.map((channel, index) => Math.round(channel + (b.rgb[index] - channel) * localT));
+  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+}
 
-  for (let row = 0; row < HEIGHT_MAP_ROWS; row += 1) {
-    for (let col = 0; col < HEIGHT_MAP_COLS; col += 1) {
-      const x = col * cellW;
-      const y = row * cellH;
-      const { lat, lon } = mapPixelToWgs84(x + cellW / 2, y + cellH / 2, center, zoom);
-      const elevationM = sampleDemAtLatLon(lat, lon);
-      let fill = "#07100d";
+function buildMapBounds(path: MatchPoint[]): MapBounds {
+  const xs = path.map((point) => point.x);
+  const ys = path.map((point) => point.y);
+  let minX = Math.min(...xs);
+  let maxX = Math.max(...xs);
+  let minY = Math.min(...ys);
+  let maxY = Math.max(...ys);
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const padding = Math.max(width, height) * 0.18;
+  minX -= padding;
+  maxX += padding;
+  minY -= padding;
+  maxY += padding;
 
-      if (elevationM !== null) {
-        const north = sampleDemAtLatLon(lat + 0.003, lon) ?? elevationM;
-        const south = sampleDemAtLatLon(lat - 0.003, lon) ?? elevationM;
-        const east = sampleDemAtLatLon(lat, lon + 0.003) ?? elevationM;
-        const west = sampleDemAtLatLon(lat, lon - 0.003) ?? elevationM;
-        const shade = clamp(0.78 + (west - east) * 0.018 + (south - north) * 0.014, 0.48, 1.2);
-        fill = heightColor(elevationM, shade);
-      }
+  const targetAspect = MAP_WIDTH / MAP_HEIGHT;
+  const currentAspect = (maxX - minX) / Math.max(1, maxY - minY);
+  if (currentAspect > targetAspect) {
+    const neededHeight = (maxX - minX) / targetAspect;
+    const centerY = (minY + maxY) / 2;
+    minY = centerY - neededHeight / 2;
+    maxY = centerY + neededHeight / 2;
+  } else {
+    const neededWidth = (maxY - minY) * targetAspect;
+    const centerX = (minX + maxX) / 2;
+    minX = centerX - neededWidth / 2;
+    maxX = centerX + neededWidth / 2;
+  }
 
-      cells.push({ key: `${row}-${col}`, row, col, x, y, width: cellW + 0.25, height: cellH + 0.25, elevationM, fill });
+  return { minX, maxX, minY, maxY };
+}
+
+function localToMap(point: Pick<MatchPoint, "x" | "y">, bounds: MapBounds) {
+  return {
+    x: ((point.x - bounds.minX) / Math.max(1, bounds.maxX - bounds.minX)) * MAP_WIDTH,
+    y: MAP_HEIGHT - ((point.y - bounds.minY) / Math.max(1, bounds.maxY - bounds.minY)) * MAP_HEIGHT,
+  };
+}
+
+function buildElevationCells(result: TerrainMatchResult, bounds: MapBounds): {
+  cells: ElevationCell[];
+  minElevationM: number;
+  maxElevationM: number;
+} {
+  const raw = [];
+  let minElevationM = Number.POSITIVE_INFINITY;
+  let maxElevationM = Number.NEGATIVE_INFINITY;
+
+  for (let row = 0; row < DEM_GRID_ROWS; row += 1) {
+    for (let col = 0; col < DEM_GRID_COLS; col += 1) {
+      const localX = bounds.minX + ((col + 0.5) / DEM_GRID_COLS) * (bounds.maxX - bounds.minX);
+      const localY = bounds.minY + ((DEM_GRID_ROWS - row - 0.5) / DEM_GRID_ROWS) * (bounds.maxY - bounds.minY);
+      const elevationM = terrainElevationMsl(result.config.terrainKind, localX, localY);
+      raw.push({ row, col, elevationM });
+      minElevationM = Math.min(minElevationM, elevationM);
+      maxElevationM = Math.max(maxElevationM, elevationM);
     }
   }
 
-  return cells;
+  const cellWidth = MAP_WIDTH / DEM_GRID_COLS;
+  const cellHeight = MAP_HEIGHT / DEM_GRID_ROWS;
+  return {
+    cells: raw.map((cell) => ({
+      key: `${cell.col}-${cell.row}`,
+      x: cell.col * cellWidth,
+      y: cell.row * cellHeight,
+      width: cellWidth + 0.4,
+      height: cellHeight + 0.4,
+      elevationM: cell.elevationM,
+      fill: terrainColor(cell.elevationM, minElevationM, maxElevationM),
+    })),
+    minElevationM,
+    maxElevationM,
+  };
 }
 
-function buildContourPath(cells: HeightMapCell[]): string {
-  const byGrid = new Map(cells.map((cell) => [`${cell.row}-${cell.col}`, cell]));
-  const segments: string[] = [];
+function pointWithDisplayCurve(path: MatchPoint[], point: MatchPoint, index: number, amplitudeM: number): MatchPoint {
+  if (path.length < 2 || amplitudeM <= 0) return point;
+  const start = path[0];
+  const finish = path[path.length - 1];
+  const dx = finish.x - start.x;
+  const dy = finish.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1) return point;
 
-  for (const cell of cells) {
-    if (cell.elevationM === null) continue;
-    const band = Math.floor(cell.elevationM / CONTOUR_STEP_M);
-    const left = byGrid.get(`${cell.row}-${cell.col - 1}`);
-    const top = byGrid.get(`${cell.row - 1}-${cell.col}`);
+  const progress = clamp(index / Math.max(1, path.length - 1), 0, 1);
+  const taper = Math.sin(Math.PI * progress);
+  const offset =
+    taper *
+    (Math.sin(progress * Math.PI * 4.6 + 0.45) * amplitudeM +
+      Math.sin(progress * Math.PI * 11.2) * amplitudeM * 0.28);
+  const normalX = -dy / length;
+  const normalY = dx / length;
 
-    if (left?.elevationM !== null && left?.elevationM !== undefined && Math.floor(left.elevationM / CONTOUR_STEP_M) !== band) {
-      segments.push(`M ${cell.x.toFixed(1)} ${cell.y.toFixed(1)} L ${cell.x.toFixed(1)} ${(cell.y + cell.height).toFixed(1)}`);
-    }
-
-    if (top?.elevationM !== null && top?.elevationM !== undefined && Math.floor(top.elevationM / CONTOUR_STEP_M) !== band) {
-      segments.push(`M ${cell.x.toFixed(1)} ${cell.y.toFixed(1)} L ${(cell.x + cell.width).toFixed(1)} ${cell.y.toFixed(1)}`);
-    }
-  }
-
-  return segments.join(" ");
+  return {
+    ...point,
+    x: point.x + normalX * offset,
+    y: point.y + normalY * offset,
+  };
 }
 
-function pathToLatLon(path: MatchPoint[]) {
-  return path.map((point) => ({ ...localPointToWgs84(point), t: point.t }));
-}
-
-function buildRoutePath(path: MatchPoint[], center: { x: number; y: number }, zoom: number) {
-  const wgs = pathToLatLon(path);
-  const step = Math.max(1, Math.floor(wgs.length / 260));
-  return wgs
-    .filter((_, index) => index % step === 0 || index === wgs.length - 1)
-    .map((point, index) => {
-      const projected = tileProject(point.lat, point.lon, zoom);
-      const x = (projected.x - center.x) * TILE_SIZE + MAP_WIDTH / 2;
-      const y = (projected.y - center.y) * TILE_SIZE + MAP_HEIGHT / 2;
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+function buildRoutePath(path: MatchPoint[], bounds: MapBounds, amplitudeM = 0) {
+  const step = Math.max(1, Math.floor(path.length / 260));
+  return path
+    .map((point, index) => ({ point, index }))
+    .filter(({ index }) => index % step === 0 || index === path.length - 1)
+    .map(({ point, index }, renderIndex) => {
+      const displayPoint = pointWithDisplayCurve(path, point, index, amplitudeM);
+      const projected = localToMap(displayPoint, bounds);
+      return `${renderIndex === 0 ? "M" : "L"} ${projected.x.toFixed(1)} ${projected.y.toFixed(1)}`;
     })
     .join(" ");
 }
 
-function pointOnMap(point: MatchPoint, center: { x: number; y: number }, zoom: number) {
-  const wgs = localPointToWgs84(point);
-  const projected = tileProject(wgs.lat, wgs.lon, zoom);
-  return {
-    x: (projected.x - center.x) * TILE_SIZE + MAP_WIDTH / 2,
-    y: (projected.y - center.y) * TILE_SIZE + MAP_HEIGHT / 2,
-  };
+function pointOnMap(point: MatchPoint, bounds: MapBounds) {
+  return localToMap(point, bounds);
 }
 
-function MapViewSwitch({ value, onChange }: { value: MapViewMode; onChange: (value: MapViewMode) => void }) {
-  return (
-    <div className="map-view-switch" role="group" aria-label="Вид карты">
-      <button className={value === "height" ? "active" : ""} type="button" onClick={() => onChange("height")}>
-        Карта высот
-      </button>
-      <button className={value === "satellite" ? "active" : ""} type="button" onClick={() => onChange("satellite")}>
-        Спутниковая подложка
-      </button>
-      <button className={value === "hybrid" ? "active" : ""} type="button" onClick={() => onChange("hybrid")}>
-        Совмещённо
-      </button>
-    </div>
-  );
-}
-
-function SatelliteMap({
-  result,
-  currentPoint,
-  mapView,
-  onMapViewChange,
-}: {
-  result: TerrainMatchResult;
-  currentPoint: MatchPoint;
-  mapView: MapViewMode;
-  onMapViewChange: (value: MapViewMode) => void;
-}) {
-  const zoom = 9;
+function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; currentPoint: MatchPoint }) {
   const basePath = result.truthAvailable && result.truthPath.length > 1 ? result.truthPath : result.estimatedPath;
+  const { bounds, elevation } = useMemo(() => {
+    const mapPath = result.truthAvailable && result.truthPath.length > 1
+      ? [...result.truthPath, ...result.estimatedPath]
+      : result.estimatedPath;
+    const nextBounds = buildMapBounds(mapPath);
+    return {
+      bounds: nextBounds,
+      elevation: buildElevationCells(result, nextBounds),
+    };
+  }, [result]);
   const start = basePath[0];
   const finish = basePath[basePath.length - 1];
-  const startWgs = localPointToWgs84(start);
-  const finishWgs = localPointToWgs84(finish);
-  const centerWgs = {
-    lat: (startWgs.lat + finishWgs.lat) / 2,
-    lon: (startWgs.lon + finishWgs.lon) / 2,
-  };
-  const centerTile = tileProject(centerWgs.lat, centerWgs.lon, zoom);
-  const tileMinX = Math.floor(centerTile.x - MAP_WIDTH / TILE_SIZE / 2) - 1;
-  const tileMaxX = Math.ceil(centerTile.x + MAP_WIDTH / TILE_SIZE / 2) + 1;
-  const tileMinY = Math.floor(centerTile.y - MAP_HEIGHT / TILE_SIZE / 2) - 1;
-  const tileMaxY = Math.ceil(centerTile.y + MAP_HEIGHT / TILE_SIZE / 2) + 1;
-  const tiles = [];
-
-  for (let x = tileMinX; x <= tileMaxX; x += 1) {
-    for (let y = tileMinY; y <= tileMaxY; y += 1) {
-      tiles.push({
-        key: `${x}-${y}`,
-        href: `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`,
-        x: (x - centerTile.x) * TILE_SIZE + MAP_WIDTH / 2,
-        y: (y - centerTile.y) * TILE_SIZE + MAP_HEIGHT / 2,
-      });
-    }
-  }
-
-  const truthD = result.truthAvailable ? buildRoutePath(result.truthPath, centerTile, zoom) : "";
-  const estimateD = buildRoutePath(result.estimatedPath, centerTile, zoom);
-  const startPoint = pointOnMap(start, centerTile, zoom);
-  const finishPoint = pointOnMap(finish, centerTile, zoom);
-  const currentMapPoint = pointOnMap(currentPoint, centerTile, zoom);
-  const heightCells = useMemo(() => buildHeightMapCells(centerTile, zoom), [centerTile.x, centerTile.y, zoom]);
-  const contourD = useMemo(() => buildContourPath(heightCells), [heightCells]);
-  const legendTicks = [0, 0.25, 0.5, 0.75, 1].map((t) =>
-    Math.round(mix(COPERNICUS_TAIGA_DEM.minElevationM, COPERNICUS_TAIGA_DEM.maxElevationM, t)),
-  );
-  const satelliteOpacity = mapView === "satellite" ? 1 : mapView === "hybrid" ? 0.34 : 0;
-  const heightOpacity = mapView === "height" ? 1 : mapView === "hybrid" ? 0.9 : 0;
-  const metersPerPixel = (156543.03392 * Math.cos((centerWgs.lat * Math.PI) / 180)) / 2 ** zoom;
-  const scaleLineMeters = 25_000;
-  const scaleLinePx = scaleLineMeters / Math.max(1, metersPerPixel);
+  const truthD = result.truthAvailable ? buildRoutePath(result.truthPath, bounds, 3600) : "";
+  const estimateD = buildRoutePath(result.estimatedPath, bounds);
+  const startPoint = pointOnMap(start, bounds);
+  const finishPoint = pointOnMap(finish, bounds);
+  const currentMapPoint = pointOnMap(currentPoint, bounds);
 
   return (
     <section className="map-shell">
@@ -563,59 +496,45 @@ function SatelliteMap({
           <span>Карта высот + траектория</span>
           <h2>{TAIGA_ROUTE.routeName}</h2>
         </div>
-        <div className="map-head-tools">
-          <MapViewSwitch value={mapView} onChange={onMapViewChange} />
-          <div className="map-legend">
-            {result.truthAvailable ? <span><i className="route-real" /> истинная траектория</span> : null}
-            <span><i className="route-found" /> оценка алгоритма</span>
-          </div>
+        <div className="map-legend">
+          <span><i className="elevation-low" /> низины</span>
+          <span><i className="elevation-high" /> высоты</span>
+          {result.truthAvailable ? <span><i className="route-real" /> стендовая траектория</span> : null}
+          <span><i className="route-found" /> оценка алгоритма</span>
         </div>
       </div>
-      <svg className="satellite-map" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} role="img" aria-label="Карта высот с найденной траекторией">
+      <svg className="satellite-map elevation-map" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} role="img" aria-label="Карта высот с найденной траекторией">
         <defs>
           <filter id="routeBlur">
             <feGaussianBlur stdDeviation="3" />
           </filter>
-          <linearGradient id="mapShade" x1="0" x2="1" y1="0" y2="1">
-            <stop offset="0%" stopColor="#061117" stopOpacity="0.2" />
-            <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0.12" />
-          </linearGradient>
-          <linearGradient id="heightLegendGradient" x1="0" x2="1" y1="0" y2="0">
-            {HEIGHT_COLOR_STOPS.map((stop) => (
-              <stop
-                key={stop.t}
-                offset={`${stop.t * 100}%`}
-                stopColor={`rgb(${stop.color[0]} ${stop.color[1]} ${stop.color[2]})`}
-              />
-            ))}
+          <linearGradient id="elevationShade" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.2" />
+            <stop offset="45%" stopColor="#000000" stopOpacity="0" />
+            <stop offset="100%" stopColor="#020617" stopOpacity="0.32" />
           </linearGradient>
         </defs>
-        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#17251b" />
-        {mapView !== "height" ? (
-          <g opacity={satelliteOpacity}>
-            {tiles.map((tile) => (
-              <image
-                key={tile.key}
-                href={tile.href}
-                x={tile.x}
-                y={tile.y}
-                width={TILE_SIZE}
-                height={TILE_SIZE}
-                preserveAspectRatio="none"
-              />
-            ))}
-            <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="rgba(3, 13, 18, 0.22)" />
-          </g>
-        ) : null}
-        {mapView !== "satellite" ? (
-          <g className="height-map-layer" opacity={heightOpacity}>
-            {heightCells.map((cell) => (
-              <rect key={cell.key} x={cell.x} y={cell.y} width={cell.width} height={cell.height} fill={cell.fill} />
-            ))}
-            <path d={contourD} className="height-contours" />
-          </g>
-        ) : null}
-        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#mapShade)" />
+        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#12306f" />
+        {elevation.cells.map((cell) => (
+          <rect
+            key={cell.key}
+            x={cell.x}
+            y={cell.y}
+            width={cell.width}
+            height={cell.height}
+            fill={cell.fill}
+            className="elevation-cell"
+          />
+        ))}
+        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#elevationShade)" />
+        <g className="map-grid-lines">
+          {Array.from({ length: 8 }, (_, index) => (
+            <line key={`v-${index}`} x1={(index + 1) * (MAP_WIDTH / 9)} x2={(index + 1) * (MAP_WIDTH / 9)} y1="0" y2={MAP_HEIGHT} />
+          ))}
+          {Array.from({ length: 4 }, (_, index) => (
+            <line key={`h-${index}`} x1="0" x2={MAP_WIDTH} y1={(index + 1) * (MAP_HEIGHT / 5)} y2={MAP_HEIGHT / 5 * (index + 1)} />
+          ))}
+        </g>
         {result.truthAvailable ? <path d={truthD} className="route-shadow" filter="url(#routeBlur)" /> : null}
         {result.truthAvailable ? <path d={truthD} className="route-real-path" /> : null}
         <path d={estimateD} className="route-found-path" />
@@ -629,18 +548,12 @@ function SatelliteMap({
         <text x={currentMapPoint.x + 13} y={currentMapPoint.y + 9} className="map-coordinate-label">
           X {formatNumber(currentPoint.x, 0)} м · Y {formatNumber(currentPoint.y, 0)} м
         </text>
-        <text x="32" y={MAP_HEIGHT - 38} className="map-scale">0     12,5     25 км</text>
-        <line x1="34" y1={MAP_HEIGHT - 25} x2={34 + scaleLinePx} y2={MAP_HEIGHT - 25} className="scale-line" />
-        <g className="height-legend-box" transform={`translate(${MAP_WIDTH - 292} ${MAP_HEIGHT - 82})`}>
-          <rect width="260" height="54" rx="6" />
-          <text x="14" y="18">высота земли, м</text>
-          <rect x="14" y="26" width="214" height="8" fill="url(#heightLegendGradient)" />
-          {legendTicks.map((tick, index) => (
-            <text key={tick} x={14 + index * (214 / 4)} y="47" textAnchor={index === 0 ? "start" : index === 4 ? "end" : "middle"}>
-              {tick}
-            </text>
-          ))}
+        <g className="elevation-range">
+          <text x="32" y="38">низины {formatNumber(elevation.minElevationM, 0)} м</text>
+          <text x="32" y="58">высоты {formatNumber(elevation.maxElevationM, 0)} м</text>
         </g>
+        <text x="32" y={MAP_HEIGHT - 38} className="map-scale">0     25     50 км</text>
+        <line x1="34" y1={MAP_HEIGHT - 25} x2="218" y2={MAP_HEIGHT - 25} className="scale-line" />
       </svg>
       <div className="map-foot">
         <span>{TAIGA_ROUTE.region}</span>
@@ -1135,7 +1048,6 @@ export function App() {
   const [config, setConfig] = useState<Config>(DEFAULT_MATCHER_CONFIG);
   const [mode, setMode] = useState<ViewMode>("operator");
   const [inputMode, setInputMode] = useState<InputMode>("simulation");
-  const [mapView, setMapView] = useState<MapViewMode>("height");
   const [rawNmeaText, setRawNmeaText] = useState("");
   const [importedResult, setImportedResult] = useState<TerrainMatchResult | null>(null);
   const [nmeaError, setNmeaError] = useState<string | null>(null);
@@ -1466,7 +1378,7 @@ export function App() {
                   onReplayChange={handleReplayChange}
                   theme={theme}
                 />
-                <SatelliteMap result={result} currentPoint={currentPoint} mapView={mapView} onMapViewChange={setMapView} />
+                <SatelliteMap result={result} currentPoint={currentPoint} />
                 <div className="bottom-grid">
                   <NmeaStream result={result} currentIndex={currentIndex} />
                   <TerrainProfile result={result} />
