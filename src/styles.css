@@ -127,10 +127,11 @@
 * { box-sizing: border-box; }
 
 html, body, #root {
-  min-width: 1260px;
+  min-width: 0;
   min-height: 100%;
   margin: 0;
   background: var(--bg);
+  overflow-x: hidden;
 }
 
 button, input, textarea { font: inherit; }
@@ -146,10 +147,11 @@ button { color: inherit; cursor: pointer; }
 /* ─── Topbar ─────────────────────────────────────────────────────────────── */
 .ops-topbar {
   display: grid;
-  grid-template-columns: 320px 1fr auto;
+  grid-template-columns: minmax(150px, 320px) minmax(0, 1fr) auto;
   align-items: center;
+  gap: 12px;
   height: 62px;
-  padding: 0 20px;
+  padding: 0 24px 0 20px;
   background: var(--glass-topbar);
   backdrop-filter: var(--blur-heavy);
   -webkit-backdrop-filter: var(--blur-heavy);
@@ -186,6 +188,7 @@ button { color: inherit; cursor: pointer; }
 
 .top-status {
   justify-self: center;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -195,6 +198,9 @@ button { color: inherit; cursor: pointer; }
   letter-spacing: 0.08em;
   text-transform: uppercase;
   opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .top-actions {
@@ -202,14 +208,16 @@ button { color: inherit; cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 7px;
+  min-width: max-content;
 }
 
-.top-actions button,
-.mini-button {
+.top-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 7px;
   height: 38px;
+  min-width: 38px;
   padding: 0 16px;
   border-radius: 6px;
   border: 1px solid var(--glass-border);
@@ -222,21 +230,10 @@ button { color: inherit; cursor: pointer; }
   transition: background var(--t), border-color var(--t), box-shadow var(--t), color var(--t);
 }
 
-.top-actions button:hover,
-.mini-button:hover {
+.top-actions button:hover {
   background: var(--glass-bg-3);
   border-color: var(--glass-border-2);
 }
-
-.top-actions button span {
-  width: 7px;
-  height: 7px;
-  margin-right: 7px;
-  border-radius: 50%;
-  background: var(--ok);
-  box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
-}
-
 
 .top-actions button.active {
   border-color: var(--accent-border-2);
@@ -245,7 +242,28 @@ button { color: inherit; cursor: pointer; }
   box-shadow: var(--accent-glow);
 }
 
-.mini-button { width: 38px; height: 38px; padding: 0; }
+.top-actions .mini-button {
+  width: auto;
+  min-width: 74px;
+  padding: 0 12px;
+}
+
+.top-actions .action-button {
+  min-width: 116px;
+  padding: 0 14px;
+}
+
+.mini-button-caption {
+  display: inline;
+  width: auto;
+  height: auto;
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  line-height: 1;
+  white-space: nowrap;
+}
 
 /* ─── Settings popover ───────────────────────────────────────────────────── */
 .settings-popover {
@@ -339,7 +357,8 @@ button { color: inherit; cursor: pointer; }
 /* ─── Main grid ──────────────────────────────────────────────────────────── */
 .ops-grid {
   display: grid;
-  grid-template-columns: 270px 1fr;
+  grid-template-columns: 270px minmax(0, 1fr) minmax(300px, 340px);
+  align-items: start;
   gap: 12px;
   padding: 14px;
 }
@@ -357,6 +376,32 @@ button { color: inherit; cursor: pointer; }
   display: grid;
   align-content: start;
   gap: 10px;
+}
+
+@media (max-width: 1100px) {
+  .ops-grid {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .right-rail {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
+@media (max-width: 760px) {
+  .ops-grid,
+  .bottom-grid,
+  .status-strip,
+  .scenario-switcher,
+  .right-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .right-rail {
+    grid-column: auto;
+  }
 }
 
 /* ─── Glass panel base ───────────────────────────────────────────────────── */
@@ -1206,6 +1251,23 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   border-radius: 7px;
   border: 1px solid var(--glass-border-dim);
   background: var(--glass-inset);
+}
+
+.left-rail .correlation-panel header {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.left-rail .correlation-panel header strong {
+  font-size: 20px;
+}
+
+.left-rail .correlation-panel .heatmap {
+  min-height: 136px;
+}
+
+.left-rail .region-panel h3 {
+  font-size: 18px;
 }
 
 .profile-chart line { stroke: rgba(59, 56, 49, 0.10); }

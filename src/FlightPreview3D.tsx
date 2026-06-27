@@ -24,8 +24,8 @@ function applyTheme3D(
   horizon: THREE.Mesh | null,
   ambient: THREE.HemisphereLight | null,
 ) {
-  // Light: Desert Sand sky — warm overcast haze
-  // Dark:  Night olive — deep jungle canopy darkness
+  // Light: Desert Sand sky - warm overcast haze
+  // Dark:  Night olive - deep jungle canopy darkness
   const skyLight = 0xC8C4BB;  // Concrete Grey / Desert Sand haze
   const skyDark  = 0x171910;  // Deep olive night
   const sky = isLight ? skyLight : skyDark;
@@ -318,7 +318,7 @@ function makeTerrainMesh(texture: THREE.Texture): THREE.Mesh {
     const z = position.getZ(i);
     const nx = Math.abs(x) / halfW;
     const nz = Math.abs(z) / halfD;
-    // Fade only the outer 12% so no visible mesa — fog handles the rest.
+    // Fade only the outer 12% so no visible mesa - fog handles the rest.
     const edgeBlend = smoothstep(0.88, 1.0, Math.max(nx, nz));
     const terrainY = terrainYAtScene(x, z);
     position.setY(i, lerp(terrainY, edgeFloor, edgeBlend));

@@ -223,9 +223,10 @@ function MiniButton({
   onClick: () => void;
 }) {
   const caption = label.split(" ")[0];
+  const compact = caption.length <= 6;
 
   return (
-    <button className={`mini-button${active ? " active" : ""}`} type="button" aria-label={label} onClick={onClick}>
+    <button className={`${compact ? "mini-button" : "action-button"}${active ? " active" : ""}`} type="button" aria-label={label} onClick={onClick}>
       {icon}
       <span className="mini-button-caption">{caption}</span>
     </button>
@@ -1217,9 +1218,9 @@ function SolutionPanel({
   );
 }
 
-function CorrelationSurface({ result }: { result: TerrainMatchResult }) {
-  const width = 560;
-  const height = 230;
+function CorrelationSurface({ result, compact = false }: { result: TerrainMatchResult; compact?: boolean }) {
+  const width = compact ? 360 : 560;
+  const height = compact ? 210 : 230;
   const speeds = Array.from(new Set(result.heatmap.map((cell) => cell.speedMps))).sort((a, b) => a - b);
   const speedIndex = new Map(speeds.map((speed, index) => [speed, index]));
   const minCorr = Math.min(...result.heatmap.map((cell) => cell.correlation));
@@ -1261,6 +1262,32 @@ function CorrelationSurface({ result }: { result: TerrainMatchResult }) {
           {result.best.azimuthDeg}° · {formatNumber(result.best.speedMps, 0)} м/с
         </text>
       </svg>
+    </section>
+  );
+}
+
+function RegionPanel({ routeKm }: { routeKm: number }) {
+  return (
+    <section className="panel region-panel">
+      <header>
+        <div>
+          <span>Район</span>
+          <h3>{TAIGA_ROUTE.region}</h3>
+        </div>
+        <Satellite size={22} />
+      </header>
+      <p>{TAIGA_ROUTE.note}</p>
+      <div className="region-stats">
+        <span>трасса <b>{formatNumber(routeKm, 1)} км</b></span>
+        <span>река <b>{TAIGA_ROUTE.riverName}</b></span>
+      </div>
+      <div className="dem-provenance">
+        <span>Карта высот</span>
+        <b>{COPERNICUS_TAIGA_DEM.sourceName}</b>
+        <small>
+          {COPERNICUS_TAIGA_DEM.width}x{COPERNICUS_TAIGA_DEM.height} · {COPERNICUS_TAIGA_DEM.bounds.latMin.toFixed(2)}-{COPERNICUS_TAIGA_DEM.bounds.latMax.toFixed(2)} N · {COPERNICUS_TAIGA_DEM.bounds.lonMin.toFixed(2)}-{COPERNICUS_TAIGA_DEM.bounds.lonMax.toFixed(2)} E · {formatIsoDate(COPERNICUS_TAIGA_DEM.generatedAt)}
+        </small>
+      </div>
     </section>
   );
 }
@@ -2083,7 +2110,7 @@ export function App() {
             <InputRow
               label="Радиовысотомер"
               value={`NMEA · ${config.sampleRateHz} Гц`}
-              help="Радиовысотомер: расстояние от борта до поверхности. Формат входа — NMEA-0183."
+              help="Радиовысотомер: расстояние от борта до поверхности. Формат входа - NMEA-0183."
             />
             <InputRow
               label="Диапазон скорости"
@@ -2107,7 +2134,7 @@ export function App() {
                   max={65}
                   step={1}
                   unit="м/с"
-                  help="Параметр стенда. Итоговая Vпут справа — результат перебора алгоритма."
+                  help="Параметр стенда. Итоговая Vпут справа - результат перебора алгоритма."
                   onChange={(value) => updateConfig("trueSpeedMps", value)}
                 />
                 <Slider
@@ -2117,7 +2144,7 @@ export function App() {
                   max={359}
                   step={1}
                   unit="°"
-                  help="Параметр стенда. Итоговый азимут справа — найденный максимум совпадения."
+                  help="Параметр стенда. Итоговый азимут справа - найденный максимум совпадения."
                   onChange={(value) => updateConfig("trueAzimuthDeg", value)}
                 />
                 <Slider
@@ -2180,6 +2207,12 @@ export function App() {
             <ToggleRow label="КАРТА ВЫСОТ" enabled />
             <ToggleRow label="КОНТУР" enabled />
           </section>
+          {inputMode !== "checkpoint" && result ? (
+            <>
+              <CorrelationSurface result={result} compact />
+              <RegionPanel routeKm={routeKm} />
+            </>
+          ) : null}
         </aside>
 
         <section className="center-stage">
@@ -2254,28 +2287,6 @@ export function App() {
               {currentAutopilotOutput ? <AlgorithmOutputPanel result={result} output={currentAutopilotOutput} /> : null}
               <ValidationPanel result={result} />
               <AlgorithmEventLog result={result} />
-              <CorrelationSurface result={result} />
-              <section className="panel region-panel">
-                <header>
-                  <div>
-                    <span>Район</span>
-                    <h3>{TAIGA_ROUTE.region}</h3>
-                  </div>
-                  <Satellite size={22} />
-                </header>
-                <p>{TAIGA_ROUTE.note}</p>
-                <div className="region-stats">
-                  <span>трасса <b>{formatNumber(routeKm, 1)} км</b></span>
-                  <span>река <b>{TAIGA_ROUTE.riverName}</b></span>
-                </div>
-                <div className="dem-provenance">
-                  <span>Карта высот</span>
-                  <b>{COPERNICUS_TAIGA_DEM.sourceName}</b>
-                  <small>
-                    {COPERNICUS_TAIGA_DEM.width}x{COPERNICUS_TAIGA_DEM.height} · {COPERNICUS_TAIGA_DEM.bounds.latMin.toFixed(2)}-{COPERNICUS_TAIGA_DEM.bounds.latMax.toFixed(2)} N · {COPERNICUS_TAIGA_DEM.bounds.lonMin.toFixed(2)}-{COPERNICUS_TAIGA_DEM.bounds.lonMax.toFixed(2)} E · {formatIsoDate(COPERNICUS_TAIGA_DEM.generatedAt)}
-                  </small>
-                </div>
-              </section>
             </>
           ) : (
             <NoNavigationOutputPanel rawText={rawNmeaText} error={nmeaError} />
