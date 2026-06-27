@@ -2,28 +2,28 @@
 :root {
   color-scheme: dark;
 
-  --bg:          #050911;
-  --bg-2:        #070c15;
-  --bg-deep:     #030508;
+  --bg:          #000000;
+  --bg-2:        #050505;
+  --bg-deep:     #000000;
 
-  --glass-bg:       rgba(255, 255, 255, 0.028);
-  --glass-bg-2:     rgba(255, 255, 255, 0.055);
-  --glass-bg-3:     rgba(255, 255, 255, 0.08);
-  --glass-topbar:   rgba(5, 9, 17, 0.78);
-  --glass-overlay:  rgba(4, 7, 14, 0.92);
-  --glass-input:    rgba(255, 255, 255, 0.022);
-  --glass-inset:    rgba(0, 0, 0, 0.28);
-  --glass-border:       rgba(255, 255, 255, 0.07);
-  --glass-border-2:     rgba(255, 255, 255, 0.11);
-  --glass-border-dim:   rgba(255, 255, 255, 0.04);
-  --glass-inner-top:    rgba(255, 255, 255, 0.08);
+  --glass-bg:       rgba(255, 255, 255, 0.05);
+  --glass-bg-2:     rgba(255, 255, 255, 0.09);
+  --glass-bg-3:     rgba(255, 255, 255, 0.13);
+  --glass-topbar:   rgba(0, 0, 0, 0.85);
+  --glass-overlay:  rgba(8, 8, 8, 0.94);
+  --glass-input:    rgba(255, 255, 255, 0.04);
+  --glass-inset:    rgba(0, 0, 0, 0.45);
+  --glass-border:       rgba(255, 255, 255, 0.10);
+  --glass-border-2:     rgba(255, 255, 255, 0.16);
+  --glass-border-dim:   rgba(255, 255, 255, 0.055);
+  --glass-inner-top:    rgba(255, 255, 255, 0.10);
   --blur:        blur(22px) saturate(160%);
   --blur-heavy:  blur(32px) saturate(180%);
   --blur-light:  blur(12px) saturate(140%);
 
-  --shadow-sm:    0 2px 10px rgba(0, 0, 0, 0.35);
-  --shadow-panel: 0 4px 28px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --shadow-float: 0 16px 48px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --shadow-sm:    0 2px 10px rgba(0, 0, 0, 0.7);
+  --shadow-panel: 0 4px 28px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --shadow-float: 0 16px 48px rgba(0, 0, 0, 0.8), 0 4px 16px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.10);
 
   --text:       #dde4ee;
   --text-2:     #f4f7fb;
@@ -37,7 +37,7 @@
   --accent-faint:    rgba(20, 184, 166, 0.06);
   --accent-border:   rgba(20, 184, 166, 0.32);
   --accent-border-2: rgba(20, 184, 166, 0.55);
-  --accent-glow:     0 0 22px rgba(20, 184, 166, 0.22), 0 0 60px rgba(20, 184, 166, 0.08);
+  --accent-glow:     none;
 
   --ok:       #34d399;
   --ok-soft:  rgba(52, 211, 153, 0.1);
@@ -96,7 +96,7 @@
   --accent-faint:    rgba(13, 148, 136, 0.05);
   --accent-border:   rgba(13, 148, 136, 0.28);
   --accent-border-2: rgba(13, 148, 136, 0.5);
-  --accent-glow:     0 0 22px rgba(13, 148, 136, 0.18), 0 0 60px rgba(13, 148, 136, 0.06);
+  --accent-glow:     none;
 
   --ok:       #059669;
   --ok-soft:  rgba(5, 150, 105, 0.1);
@@ -123,18 +123,11 @@ button { color: inherit; cursor: pointer; }
 /* ─── Shell ──────────────────────────────────────────────────────────────── */
 .ops-shell {
   min-height: 100vh;
-  background:
-    radial-gradient(ellipse 900px 600px at 8%  75%, rgba(20, 184, 166, 0.055) 0%, transparent 65%),
-    radial-gradient(ellipse 700px 500px at 88% 18%, rgba(99, 102, 241, 0.038) 0%, transparent 60%),
-    radial-gradient(ellipse 500px 400px at 55% 90%, rgba(20, 184, 166, 0.03)  0%, transparent 55%),
-    var(--bg);
+  background: var(--bg);
 }
 
 [data-theme="light"] .ops-shell {
-  background:
-    radial-gradient(ellipse 900px 600px at 8%  75%, rgba(13, 148, 136, 0.06) 0%, transparent 65%),
-    radial-gradient(ellipse 700px 500px at 88% 18%, rgba(99, 102, 241, 0.04) 0%, transparent 60%),
-    var(--bg);
+  background: var(--bg);
 }
 
 /* ─── Topbar ─────────────────────────────────────────────────────────────── */
@@ -831,7 +824,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   border-radius: 7px;
   border: 1px solid var(--glass-border);
   overflow: hidden;
-  background: #17261d;
+  background: #0c1a11;
 }
 
 /* ─── SVG map elements ───────────────────────────────────────────────────── */
@@ -1225,7 +1218,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   overflow: hidden;
   border-radius: 8px;
   border: 1px solid var(--glass-border-dim);
-  background: #04070d;
+  background: #080d14;
 }
 
 .center-stage > .flight3d-panel .flight3d-stage { height: 355px; }
