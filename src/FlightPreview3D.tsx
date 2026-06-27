@@ -710,15 +710,15 @@ export function FlightPreview3D({
           <span>Реконструкция полёта</span>
           <h3>БВС над спутниковой тайгой</h3>
         </div>
-        <strong>{Math.round(agl)} м AGL</strong>
+        <strong>{Math.round(agl)} м над землёй</strong>
       </header>
       <div className="flight3d-stage">
         <canvas ref={canvasRef} data-testid="flight-preview-3d" />
         <div className="flight3d-hud">
-          <span>БАРО MSL {Math.round(result.config.baroAltitudeM)} м</span>
-          <span>РВ AGL {Math.round(agl)} м</span>
-          <span>Vпут {result.best.speedMps.toFixed(1)} м/с</span>
-          <span>Источник {result.truthAvailable ? "стенд" : "NMEA"}</span>
+          <span>Барометр {Math.round(result.config.baroAltitudeM)} м</span>
+          <span>Над землёй {Math.round(agl)} м</span>
+          <span>Скорость {result.best.speedMps.toFixed(1)} м/с</span>
+          <span>{result.truthAvailable ? "Стенд" : "Журнал НМЕА"}</span>
           <span>T+ {Math.round(replayState?.elapsedS ?? 0)} с</span>
           <span>{isReplayPaused ? "Пауза" : `Прокрутка x${replaySpeedMultiplier}`} · {replayDurationMin} мин</span>
         </div>

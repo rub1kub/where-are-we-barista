@@ -1096,30 +1096,51 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 /* ─── Confidence ─────────────────────────────────────────────────────────── */
 .confidence {
   margin-top: 12px;
-  padding: 13px;
+  padding: 14px 16px 12px;
   border-radius: 8px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-faint);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
   backdrop-filter: var(--blur-light);
 }
 
-.confidence div { display: flex; align-items: baseline; justify-content: space-between; }
-.confidence strong { color: var(--accent); font-size: 36px; font-weight: 200; line-height: 1; }
+.confidence div {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.confidence span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding-bottom: 4px;
+}
+
+.confidence strong {
+  color: var(--text-2);
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
 
 .confidence i {
   display: block;
-  height: 3px;
-  margin-top: 12px;
+  height: 2px;
+  margin-top: 10px;
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: 1px;
   background: var(--glass-border-dim);
 }
 
 .confidence em {
   display: block;
   height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, var(--route-blue), var(--ok));
+  border-radius: 1px;
+  background: var(--accent);
 }
 
 /* ─── Region panel ───────────────────────────────────────────────────────── */

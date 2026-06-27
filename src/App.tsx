@@ -84,6 +84,31 @@ function statusClass(status: NavigationStatus): string {
   return "bad";
 }
 
+function statusLabel(status: NavigationStatus): string {
+  switch (status) {
+    case "FIX VALID":    return "РЕШЕНИЕ НАДЁЖНО";
+    case "FIX DEGRADED": return "РЕШЕНИЕ СНИЖЕНО";
+    case "FIX AMBIGUOUS": return "НЕОДНОЗНАЧНО";
+    case "LOW RELIEF":   return "СЛАБЫЙ РЕЛЬЕФ";
+    case "NO FIX":       return "НЕТ РЕШЕНИЯ";
+  }
+}
+
+function eventLabel(code: string): string {
+  switch (code) {
+    case "RA_STREAM_STARTED":    return "Поток РВ запущен";
+    case "PROFILE_WINDOW_READY": return "Окно профиля готово";
+    case "SEARCH_STARTED":       return "Поиск запущен";
+    case "BEST_CANDIDATE":       return "Кандидат найден";
+    case "FIX_VALID":            return "Решение надёжно";
+    case "FIX_DEGRADED":         return "Решение снижено";
+    case "FIX_AMBIGUOUS":        return "Неоднозначно";
+    case "LOW_RELIEF":           return "Слабый рельеф";
+    case "NO_FIX":               return "Нет решения";
+    default:                     return code;
+  }
+}
+
 function buildCumulativeDistances(path: MatchPoint[]): number[] {
   let total = 0;
   return path.map((point, index) => {
@@ -413,7 +438,7 @@ function StatusStrip({ result }: { result: TerrainMatchResult }) {
     <section className="status-strip">
       <div>
         <span>Статус</span>
-        <strong className={statusClass(result.navigationStatus)}>{result.navigationStatus}</strong>
+        <strong className={statusClass(result.navigationStatus)}>{statusLabel(result.navigationStatus)}</strong>
       </div>
       <div>
         <span>ГНСС</span>
@@ -455,7 +480,7 @@ function SolutionPanel({
     <aside className="solution-card">
       <div className="solution-top">
         <span>Оценка положения · T+ {formatDuration(currentElapsedS)}</span>
-        <strong className={statusClass(result.navigationStatus)}>{result.navigationStatus}</strong>
+        <strong className={statusClass(result.navigationStatus)}>{statusLabel(result.navigationStatus)}</strong>
         <p>{result.statusReason}</p>
       </div>
       <div className="coordinates">
@@ -479,7 +504,7 @@ function SolutionPanel({
           <strong>{formatNumber(result.best.azimuthDeg, 0)}°</strong>
         </div>
         <div>
-          <span>РВ AGL</span>
+          <span>Высота над землёй</span>
           <strong>{formatMeters(currentAglM)}</strong>
         </div>
         <div>
@@ -489,7 +514,7 @@ function SolutionPanel({
       </div>
       <div className="confidence">
         <div>
-          <span>Достоверность оценки</span>
+          <span>Достоверность</span>
           <strong>{confidence}%</strong>
         </div>
         <i><em style={{ width: `${confidence}%` }} /></i>
@@ -571,7 +596,7 @@ function TerrainProfile({ result }: { result: TerrainMatchResult }) {
       <header>
         <div>
           <span>Профиль рельефа</span>
-          <h3>MSL = BARO - RA</h3>
+          <h3>Высоты вдоль трассы</h3>
         </div>
         <div className="chart-legend">
           <span><i className="measured" /> измерено РВ</span>
@@ -622,23 +647,23 @@ function ValidationPanel({ result }: { result: TerrainMatchResult }) {
         <CheckCircle2 size={22} />
       </header>
       <div className="fact-list">
-        <div><Gauge size={17} /><span>corr max: <b>{result.best.correlation.toFixed(3)}</b></span></div>
-        <div><Gauge size={17} /><span>corr второй: <b>{result.secondCorrelation?.toFixed(3) ?? "н/д"}</b></span></div>
-        <div><Activity size={17} /><span>зазор: <b>{result.ambiguity.toFixed(3)}</b></span></div>
+        <div><Gauge size={17} /><span>Пик корреляции: <b>{result.best.correlation.toFixed(3)}</b></span></div>
+        <div><Gauge size={17} /><span>Второй пик: <b>{result.secondCorrelation?.toFixed(3) ?? "н/д"}</b></span></div>
+        <div><Activity size={17} /><span>Разрыв пиков: <b>{result.ambiguity.toFixed(3)}</b></span></div>
         <div><Activity size={17} /><span>СКО профиля: <b>{formatMeters(result.best.rmseM)}</b></span></div>
-        <div><Clock3 size={17} /><span>расчёт: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
-        <div><Gauge size={17} /><span>достоверность: <b>{result.best.confidence}%</b></span></div>
-        <div><AlertTriangle size={17} /><span>σ рельефа: <b>{formatMetric(result.terrainStdM, 1, "м")}</b></span></div>
-        <div><AlertTriangle size={17} /><span>КС NMEA: <b>{result.nmeaQuality.checksumInvalid > 0 ? `${result.nmeaQuality.checksumInvalid} ошибок` : "норма"}</b></span></div>
+        <div><Clock3 size={17} /><span>Время расчёта: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
+        <div><Gauge size={17} /><span>Достоверность: <b>{result.best.confidence}%</b></span></div>
+        <div><AlertTriangle size={17} /><span>Изменчивость рельефа: <b>{formatMetric(result.terrainStdM, 1, "м")}</b></span></div>
+        <div><AlertTriangle size={17} /><span>Контрольная сумма НМЕА: <b>{result.nmeaQuality.checksumInvalid > 0 ? `${result.nmeaQuality.checksumInvalid} ошибок` : "норма"}</b></span></div>
         {result.truthAvailable ? (
           <>
-            <div><Activity size={17} /><span>ΔV: <b>{formatMetric(result.speedErrorMps, 1, "м/с")}</b></span></div>
-            <div><Activity size={17} /><span>Δaz: <b>{formatMetric(result.azimuthErrorDeg, 0, "°")}</b></span></div>
-            <div><MapPinned size={17} /><span>ошибка финал: <b>{formatMetric(result.finalErrorM, 0, "м")}</b></span></div>
-            <div><MapPinned size={17} /><span>ошибка средняя: <b>{formatMetric(result.meanErrorM, 0, "м")}</b></span></div>
+            <div><Activity size={17} /><span>Ошибка скорости: <b>{formatMetric(result.speedErrorMps, 1, "м/с")}</b></span></div>
+            <div><Activity size={17} /><span>Ошибка азимута: <b>{formatMetric(result.azimuthErrorDeg, 0, "°")}</b></span></div>
+            <div><MapPinned size={17} /><span>Ошибка финальная: <b>{formatMetric(result.finalErrorM, 0, "м")}</b></span></div>
+            <div><MapPinned size={17} /><span>Ошибка средняя: <b>{formatMetric(result.meanErrorM, 0, "м")}</b></span></div>
           </>
         ) : (
-          <div><AlertTriangle size={17} /><span>truth unavailable: <b>эталон не приложен</b></span></div>
+          <div><AlertTriangle size={17} /><span>Эталон: <b>не приложен</b></span></div>
         )}
       </div>
     </section>
@@ -652,8 +677,8 @@ function AutopilotOutputPanel({ result }: { result: TerrainMatchResult }) {
     <section className="panel autopilot-panel">
       <header>
         <div>
-          <span>Выход для автопилота</span>
-          <h3>Пакет оценки</h3>
+          <span>Канал автопилота</span>
+          <h3>Данные навигации</h3>
         </div>
         <Signal size={22} />
       </header>
@@ -675,7 +700,7 @@ function AutopilotOutputPanel({ result }: { result: TerrainMatchResult }) {
           <b>{formatCoord(output.lon, "lon")}</b>
         </div>
         <div>
-          <span>Vпут</span>
+          <span>Путевая скорость</span>
           <b>{formatNumber(output.groundSpeedMps, 1)} м/с</b>
         </div>
         <div>
@@ -688,14 +713,14 @@ function AutopilotOutputPanel({ result }: { result: TerrainMatchResult }) {
         </div>
         <div>
           <span>Статус</span>
-          <b>{output.navigationStatus}</b>
+          <b>{statusLabel(output.navigationStatus)}</b>
         </div>
         <div>
           <span>Неопределённость</span>
           <b>{output.uncertaintyM === null ? "н/д" : `${formatNumber(output.uncertaintyM, 0)} м`}</b>
         </div>
         <div>
-          <span>КС NMEA</span>
+          <span>Контрольная сумма</span>
           <b>{result.nmeaQuality.checksumInvalid > 0 ? `ошибка ${result.nmeaQuality.checksumInvalid}` : "норма"}</b>
         </div>
         <div className="wide">
@@ -720,7 +745,7 @@ function AlgorithmEventLog({ result }: { result: TerrainMatchResult }) {
       <div className="event-log">
         {result.events.map((event) => (
           <div key={`${event.code}-${event.elapsedMs}`}>
-            <code>{event.code}</code>
+            <code>{eventLabel(event.code)}</code>
             <span>{event.elapsedMs} мс</span>
           </div>
         ))}
@@ -738,15 +763,15 @@ function MethodologyMode() {
       </article>
       <article>
         <strong>1. Радиовысотомер</strong>
-        <span>РВ AGL показывает расстояние от борта до поверхности.</span>
+        <span>Радиовысотомер измеряет расстояние от борта до поверхности.</span>
       </article>
       <article>
         <strong>2. Барометр</strong>
-        <span>БАРО MSL задаёт абсолютную высоту борта над уровнем моря.</span>
+        <span>Барометр задаёт абсолютную высоту борта над уровнем моря.</span>
       </article>
       <article>
         <strong>3. Профиль</strong>
-        <span>MSL = BARO - RA. Так получается профиль высот земли вдоль трассы.</span>
+        <span>Высота земли = Барометр − Радиовысотомер. Так получается профиль рельефа вдоль трассы.</span>
       </article>
       <article>
         <strong>4. Корреляция</strong>
@@ -758,7 +783,7 @@ function MethodologyMode() {
       </article>
       <article>
         <strong>6. 3D-реконструкция</strong>
-        <span>Превью не управляет расчётом: оно показывает текущую найденную траекторию, скорость и AGL из результата matcher-а.</span>
+        <span>Превью не управляет расчётом: оно показывает текущую найденную траекторию, скорость и высоту над землёй из результата алгоритма.</span>
       </article>
       <article>
         <strong>7. Поправка курса</strong>
@@ -801,7 +826,7 @@ function NoNavigationOutputPanel({ rawText, error }: { rawText: string; error: s
       <header>
         <div>
           <span>Выход для автопилота</span>
-          <h3>Нет пакета оценки</h3>
+          <h3>Данные не готовы</h3>
         </div>
         <Signal size={22} />
       </header>
@@ -1074,17 +1099,17 @@ export function App() {
               help="Цифровая модель рельефа. В рабочем контуре заменяется на Copernicus GLO-30, SRTM или ALOS."
             />
             <InputRow
-              label="БАРО MSL"
+              label="Барометр МСЛ"
               value={`${formatNumber(config.baroAltitudeM, 0)} м`}
               help="Абсолютная высота борта над уровнем моря. В кейсе задано 1500 м."
             />
             <InputRow
-              label="РВ AGL"
+              label="Радиовысотомер"
               value={`NMEA · ${config.sampleRateHz} Гц`}
               help="Радиовысотомер: расстояние от борта до поверхности. Формат входа — NMEA-0183."
             />
             <InputRow
-              label="Диапазон Vпут"
+              label="Диапазон скорости"
               value={`${config.speedMinMps}-${config.speedMaxMps} м/с`}
               help="Диапазон перебора путевой скорости."
             />
@@ -1104,7 +1129,7 @@ export function App() {
             {inputMode === "simulation" ? (
               <>
                 <Slider
-                  label="Vпут"
+                  label="Скорость"
                   value={config.trueSpeedMps}
                   min={35}
                   max={65}
