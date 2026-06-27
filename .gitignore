@@ -9,3 +9,4 @@ coverage/
 *.tsbuildinfo
 playwright-report/
 test-results/
+rust-core/target/
