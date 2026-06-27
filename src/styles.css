@@ -832,6 +832,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .route-real, .measured   { background: var(--route-blue); }
 .route-found, .reference { background: var(--route-green); }
+.elevation-low { background: linear-gradient(90deg, #1448a1, #0ea5b7); }
+.elevation-high { background: linear-gradient(90deg, #eab308, #ef4444); }
 
 .satellite-map {
   display: block;
@@ -843,13 +845,25 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   background: #0c1a11;
 }
 
+.elevation-map {
+  background: #12306f;
+  box-shadow: inset 0 0 90px rgba(2, 6, 23, 0.46);
+}
+
+.elevation-cell { shape-rendering: crispEdges; }
+
+.map-grid-lines line {
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 1;
+}
+
 /* ─── SVG map elements ───────────────────────────────────────────────────── */
 .route-shadow { fill: none; stroke: rgba(0,0,0,0.65); stroke-width: 12; }
 
 .route-real-path {
   fill: none;
   stroke: var(--route-blue);
-  stroke-width: 3.5;
+  stroke-width: 4.5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -857,7 +871,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .route-found-path {
   fill: none;
   stroke: var(--route-green);
-  stroke-width: 3.5;
+  stroke-width: 4;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 9 8;
@@ -878,7 +892,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 [data-theme="light"] .map-current-dot { stroke: #e8edf4; }
 
 .map-label,
-.map-scale {
+.map-scale,
+.elevation-range text {
   fill: #f4fffd;
   paint-order: stroke;
   stroke: rgba(0,0,0,0.65);
@@ -888,9 +903,16 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 }
 
 [data-theme="light"] .map-label,
-[data-theme="light"] .map-scale { fill: #0f172a; stroke: rgba(255,255,255,0.75); }
+[data-theme="light"] .map-scale,
+[data-theme="light"] .elevation-range text { fill: #0f172a; stroke: rgba(255,255,255,0.75); }
 
 .map-scale { font-size: 11px; font-weight: 600; }
+.elevation-range text {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 .scale-line { stroke: #f4fffd; stroke-width: 2.5; }
 [data-theme="light"] .scale-line { stroke: #0f172a; }
 

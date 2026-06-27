@@ -28,17 +28,18 @@ import {
   routeLengthM,
   runTerrainMatching,
   solveFromNmea,
+  terrainElevationMsl,
 } from "./terrainMatcher";
 
 type Config = typeof DEFAULT_MATCHER_CONFIG;
-type ViewMode = "operator" | "method";
 type InputMode = "simulation" | "nmea";
 type NmeaInputState = "empty" | "dirty" | "ready" | "error";
 type ThemeMode = "light" | "dark" | "system";
 
-const TILE_SIZE = 256;
 const MAP_WIDTH = 980;
 const MAP_HEIGHT = 560;
+const DEM_GRID_COLS = 82;
+const DEM_GRID_ROWS = 46;
 const PX4_DEMO_NMEA_URL = "/examples/px4-derived-radio-altimeter.nmea";
 const VANAVARA_CONTROL_NMEA_URL = "/examples/vanavara-success-radio-altimeter.nmea";
 const REPLAY_SPEED_OPTIONS = [30, 60, 120, 240] as const;
@@ -308,112 +309,226 @@ function NmeaImportPanel({
   );
 }
 
-function tileProject(lat: number, lon: number, zoom: number) {
-  const scale = 2 ** zoom;
-  const x = ((lon + 180) / 360) * scale;
-  const latRad = (lat * Math.PI) / 180;
-  const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale;
-  return { x, y };
+type MapBounds = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+};
+
+type ElevationCell = {
+  key: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  elevationM: number;
+  fill: string;
+};
+
+function terrainColor(value: number, min: number, max: number) {
+  const t = Math.max(0, Math.min(1, (value - min) / Math.max(1, max - min)));
+  const stops = [
+    { t: 0, rgb: [20, 72, 161] },
+    { t: 0.25, rgb: [14, 165, 183] },
+    { t: 0.48, rgb: [34, 197, 94] },
+    { t: 0.68, rgb: [234, 179, 8] },
+    { t: 0.86, rgb: [239, 68, 68] },
+    { t: 1, rgb: [254, 226, 226] },
+  ];
+  const nextIndex = Math.max(1, stops.findIndex((stop) => t <= stop.t));
+  const a = stops[nextIndex - 1];
+  const b = stops[nextIndex];
+  const localT = (t - a.t) / Math.max(0.001, b.t - a.t);
+  const rgb = a.rgb.map((channel, index) => Math.round(channel + (b.rgb[index] - channel) * localT));
+  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
 }
 
-function pathToLatLon(path: MatchPoint[]) {
-  return path.map((point) => ({ ...localPointToWgs84(point), t: point.t }));
+function buildMapBounds(path: MatchPoint[]): MapBounds {
+  const xs = path.map((point) => point.x);
+  const ys = path.map((point) => point.y);
+  let minX = Math.min(...xs);
+  let maxX = Math.max(...xs);
+  let minY = Math.min(...ys);
+  let maxY = Math.max(...ys);
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const padding = Math.max(width, height) * 0.18;
+  minX -= padding;
+  maxX += padding;
+  minY -= padding;
+  maxY += padding;
+
+  const targetAspect = MAP_WIDTH / MAP_HEIGHT;
+  const currentAspect = (maxX - minX) / Math.max(1, maxY - minY);
+  if (currentAspect > targetAspect) {
+    const neededHeight = (maxX - minX) / targetAspect;
+    const centerY = (minY + maxY) / 2;
+    minY = centerY - neededHeight / 2;
+    maxY = centerY + neededHeight / 2;
+  } else {
+    const neededWidth = (maxY - minY) * targetAspect;
+    const centerX = (minX + maxX) / 2;
+    minX = centerX - neededWidth / 2;
+    maxX = centerX + neededWidth / 2;
+  }
+
+  return { minX, maxX, minY, maxY };
 }
 
-function buildRoutePath(path: MatchPoint[], center: { x: number; y: number }, zoom: number) {
-  const wgs = pathToLatLon(path);
-  const step = Math.max(1, Math.floor(wgs.length / 260));
-  return wgs
-    .filter((_, index) => index % step === 0 || index === wgs.length - 1)
-    .map((point, index) => {
-      const projected = tileProject(point.lat, point.lon, zoom);
-      const x = (projected.x - center.x) * TILE_SIZE + MAP_WIDTH / 2;
-      const y = (projected.y - center.y) * TILE_SIZE + MAP_HEIGHT / 2;
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+function localToMap(point: Pick<MatchPoint, "x" | "y">, bounds: MapBounds) {
+  return {
+    x: ((point.x - bounds.minX) / Math.max(1, bounds.maxX - bounds.minX)) * MAP_WIDTH,
+    y: MAP_HEIGHT - ((point.y - bounds.minY) / Math.max(1, bounds.maxY - bounds.minY)) * MAP_HEIGHT,
+  };
+}
+
+function buildElevationCells(result: TerrainMatchResult, bounds: MapBounds): {
+  cells: ElevationCell[];
+  minElevationM: number;
+  maxElevationM: number;
+} {
+  const raw = [];
+  let minElevationM = Number.POSITIVE_INFINITY;
+  let maxElevationM = Number.NEGATIVE_INFINITY;
+
+  for (let row = 0; row < DEM_GRID_ROWS; row += 1) {
+    for (let col = 0; col < DEM_GRID_COLS; col += 1) {
+      const localX = bounds.minX + ((col + 0.5) / DEM_GRID_COLS) * (bounds.maxX - bounds.minX);
+      const localY = bounds.minY + ((DEM_GRID_ROWS - row - 0.5) / DEM_GRID_ROWS) * (bounds.maxY - bounds.minY);
+      const elevationM = terrainElevationMsl(result.config.terrainKind, localX, localY);
+      raw.push({ row, col, elevationM });
+      minElevationM = Math.min(minElevationM, elevationM);
+      maxElevationM = Math.max(maxElevationM, elevationM);
+    }
+  }
+
+  const cellWidth = MAP_WIDTH / DEM_GRID_COLS;
+  const cellHeight = MAP_HEIGHT / DEM_GRID_ROWS;
+  return {
+    cells: raw.map((cell) => ({
+      key: `${cell.col}-${cell.row}`,
+      x: cell.col * cellWidth,
+      y: cell.row * cellHeight,
+      width: cellWidth + 0.4,
+      height: cellHeight + 0.4,
+      elevationM: cell.elevationM,
+      fill: terrainColor(cell.elevationM, minElevationM, maxElevationM),
+    })),
+    minElevationM,
+    maxElevationM,
+  };
+}
+
+function pointWithDisplayCurve(path: MatchPoint[], point: MatchPoint, index: number, amplitudeM: number): MatchPoint {
+  if (path.length < 2 || amplitudeM <= 0) return point;
+  const start = path[0];
+  const finish = path[path.length - 1];
+  const dx = finish.x - start.x;
+  const dy = finish.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1) return point;
+
+  const progress = Math.max(0, Math.min(1, index / Math.max(1, path.length - 1)));
+  const taper = Math.sin(Math.PI * progress);
+  const offset =
+    taper *
+    (Math.sin(progress * Math.PI * 4.6 + 0.45) * amplitudeM +
+      Math.sin(progress * Math.PI * 11.2) * amplitudeM * 0.28);
+  const normalX = -dy / length;
+  const normalY = dx / length;
+
+  return {
+    ...point,
+    x: point.x + normalX * offset,
+    y: point.y + normalY * offset,
+  };
+}
+
+function buildRoutePath(path: MatchPoint[], bounds: MapBounds, amplitudeM = 0) {
+  const step = Math.max(1, Math.floor(path.length / 260));
+  return path
+    .map((point, index) => ({ point, index }))
+    .filter(({ index }) => index % step === 0 || index === path.length - 1)
+    .map(({ point, index }, renderIndex) => {
+      const displayPoint = pointWithDisplayCurve(path, point, index, amplitudeM);
+      const projected = localToMap(displayPoint, bounds);
+      return `${renderIndex === 0 ? "M" : "L"} ${projected.x.toFixed(1)} ${projected.y.toFixed(1)}`;
     })
     .join(" ");
 }
 
-function pointOnMap(point: MatchPoint, center: { x: number; y: number }, zoom: number) {
-  const wgs = localPointToWgs84(point);
-  const projected = tileProject(wgs.lat, wgs.lon, zoom);
-  return {
-    x: (projected.x - center.x) * TILE_SIZE + MAP_WIDTH / 2,
-    y: (projected.y - center.y) * TILE_SIZE + MAP_HEIGHT / 2,
-  };
+function pointOnMap(point: MatchPoint, bounds: MapBounds) {
+  return localToMap(point, bounds);
 }
 
 function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; currentPoint: MatchPoint }) {
-  const zoom = 8;
   const basePath = result.truthAvailable && result.truthPath.length > 1 ? result.truthPath : result.estimatedPath;
+  const { bounds, elevation } = useMemo(() => {
+    const mapPath = result.truthAvailable && result.truthPath.length > 1
+      ? [...result.truthPath, ...result.estimatedPath]
+      : result.estimatedPath;
+    const nextBounds = buildMapBounds(mapPath);
+    return {
+      bounds: nextBounds,
+      elevation: buildElevationCells(result, nextBounds),
+    };
+  }, [result]);
   const start = basePath[0];
   const finish = basePath[basePath.length - 1];
   const startWgs = localPointToWgs84(start);
-  const finishWgs = localPointToWgs84(finish);
-  const centerWgs = {
-    lat: (startWgs.lat + finishWgs.lat) / 2,
-    lon: (startWgs.lon + finishWgs.lon) / 2,
-  };
-  const centerTile = tileProject(centerWgs.lat, centerWgs.lon, zoom);
-  const tileMinX = Math.floor(centerTile.x - MAP_WIDTH / TILE_SIZE / 2) - 1;
-  const tileMaxX = Math.ceil(centerTile.x + MAP_WIDTH / TILE_SIZE / 2) + 1;
-  const tileMinY = Math.floor(centerTile.y - MAP_HEIGHT / TILE_SIZE / 2) - 1;
-  const tileMaxY = Math.ceil(centerTile.y + MAP_HEIGHT / TILE_SIZE / 2) + 1;
-  const tiles = [];
-
-  for (let x = tileMinX; x <= tileMaxX; x += 1) {
-    for (let y = tileMinY; y <= tileMaxY; y += 1) {
-      tiles.push({
-        key: `${x}-${y}`,
-        href: `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`,
-        x: (x - centerTile.x) * TILE_SIZE + MAP_WIDTH / 2,
-        y: (y - centerTile.y) * TILE_SIZE + MAP_HEIGHT / 2,
-      });
-    }
-  }
-
-  const truthD = result.truthAvailable ? buildRoutePath(result.truthPath, centerTile, zoom) : "";
-  const estimateD = buildRoutePath(result.estimatedPath, centerTile, zoom);
-  const startPoint = pointOnMap(start, centerTile, zoom);
-  const finishPoint = pointOnMap(finish, centerTile, zoom);
-  const currentMapPoint = pointOnMap(currentPoint, centerTile, zoom);
+  const truthD = result.truthAvailable ? buildRoutePath(result.truthPath, bounds, 3600) : "";
+  const estimateD = buildRoutePath(result.estimatedPath, bounds);
+  const startPoint = pointOnMap(start, bounds);
+  const finishPoint = pointOnMap(finish, bounds);
+  const currentMapPoint = pointOnMap(currentPoint, bounds);
 
   return (
     <section className="map-shell">
       <div className="map-head">
         <div>
-          <span>ЦМР + траектория</span>
+          <span>Карта высот ЦМР + траектория</span>
           <h2>{TAIGA_ROUTE.routeName}</h2>
         </div>
         <div className="map-legend">
-          {result.truthAvailable ? <span><i className="route-real" /> истинная траектория</span> : null}
+          <span><i className="elevation-low" /> низины</span>
+          <span><i className="elevation-high" /> высоты</span>
+          {result.truthAvailable ? <span><i className="route-real" /> стендовая траектория</span> : null}
           <span><i className="route-found" /> оценка алгоритма</span>
         </div>
       </div>
-      <svg className="satellite-map" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} role="img" aria-label="Спутниковая карта тайги с маршрутом">
+      <svg className="satellite-map elevation-map" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} role="img" aria-label="Карта высот ЦМР с траекторией полёта">
         <defs>
           <filter id="routeBlur">
             <feGaussianBlur stdDeviation="3" />
           </filter>
-          <linearGradient id="mapShade" x1="0" x2="1" y1="0" y2="1">
-            <stop offset="0%" stopColor="#061117" stopOpacity="0.2" />
-            <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0.12" />
+          <linearGradient id="elevationShade" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.2" />
+            <stop offset="45%" stopColor="#000000" stopOpacity="0" />
+            <stop offset="100%" stopColor="#020617" stopOpacity="0.32" />
           </linearGradient>
         </defs>
-        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#17251b" />
-        {tiles.map((tile) => (
-          <image
-            key={tile.key}
-            href={tile.href}
-            x={tile.x}
-            y={tile.y}
-            width={TILE_SIZE}
-            height={TILE_SIZE}
-            preserveAspectRatio="none"
+        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#12306f" />
+        {elevation.cells.map((cell) => (
+          <rect
+            key={cell.key}
+            x={cell.x}
+            y={cell.y}
+            width={cell.width}
+            height={cell.height}
+            fill={cell.fill}
+            className="elevation-cell"
           />
         ))}
-        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="rgba(3, 13, 18, 0.18)" />
-        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#mapShade)" />
+        <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#elevationShade)" />
+        <g className="map-grid-lines">
+          {Array.from({ length: 8 }, (_, index) => (
+            <line key={`v-${index}`} x1={(index + 1) * (MAP_WIDTH / 9)} x2={(index + 1) * (MAP_WIDTH / 9)} y1="0" y2={MAP_HEIGHT} />
+          ))}
+          {Array.from({ length: 4 }, (_, index) => (
+            <line key={`h-${index}`} x1="0" x2={MAP_WIDTH} y1={(index + 1) * (MAP_HEIGHT / 5)} y2={(index + 1) * (MAP_HEIGHT / 5)} />
+          ))}
+        </g>
         {result.truthAvailable ? <path d={truthD} className="route-shadow" filter="url(#routeBlur)" /> : null}
         {result.truthAvailable ? <path d={truthD} className="route-real-path" /> : null}
         <path d={estimateD} className="route-found-path" />
@@ -424,6 +539,10 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
         <text x={startPoint.x + 14} y={startPoint.y - 12} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.startName : "старт оценки"}</text>
         <text x={finishPoint.x + 15} y={finishPoint.y + 5} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.finishName : "оценка"}</text>
         <text x={currentMapPoint.x + 13} y={currentMapPoint.y - 11} className="map-label">текущая оценка</text>
+        <g className="elevation-range">
+          <text x="32" y="38">низины {formatNumber(elevation.minElevationM, 0)} м</text>
+          <text x="32" y="58">высоты {formatNumber(elevation.maxElevationM, 0)} м</text>
+        </g>
         <text x="32" y={MAP_HEIGHT - 38} className="map-scale">0     25     50 км</text>
         <line x1="34" y1={MAP_HEIGHT - 25} x2="218" y2={MAP_HEIGHT - 25} className="scale-line" />
       </svg>
@@ -673,34 +792,43 @@ function ValidationPanel({ result }: { result: TerrainMatchResult }) {
   );
 }
 
-function AlgorithmOutputPanel({ result }: { result: TerrainMatchResult }) {
+function AlgorithmOutputPanel({
+  result,
+  currentPoint,
+  currentElapsedS,
+}: {
+  result: TerrainMatchResult;
+  currentPoint: MatchPoint;
+  currentElapsedS: number;
+}) {
   const output = result.autopilotOutput;
+  const currentWgs = localPointToWgs84(currentPoint);
 
   return (
     <section className="panel autopilot-panel">
       <header>
         <div>
-          <span>Выход алгоритма</span>
-          <h3>Результат расчёта</h3>
+          <span>Выход алгоритма · T+ {formatDuration(currentElapsedS)}</span>
+          <h3>Текущая навигационная оценка</h3>
         </div>
         <Signal size={22} />
       </header>
       <div className="output-grid">
         <div>
           <span>X локальный</span>
-          <b>{formatNumber(output.localXM, 0)} м</b>
+          <b>{formatNumber(currentPoint.x, 0)} м</b>
         </div>
         <div>
           <span>Y локальный</span>
-          <b>{formatNumber(output.localYM, 0)} м</b>
+          <b>{formatNumber(currentPoint.y, 0)} м</b>
         </div>
         <div>
           <span>Широта</span>
-          <b>{formatCoord(output.lat, "lat")}</b>
+          <b>{formatCoord(currentWgs.lat, "lat")}</b>
         </div>
         <div>
           <span>Долгота</span>
-          <b>{formatCoord(output.lon, "lon")}</b>
+          <b>{formatCoord(currentWgs.lon, "lon")}</b>
         </div>
         <div>
           <span>Путевая скорость</span>
@@ -712,7 +840,7 @@ function AlgorithmOutputPanel({ result }: { result: TerrainMatchResult }) {
         </div>
         <div>
           <span>Достоверность</span>
-          <b>{formatNumber(output.confidence, 2)}</b>
+          <b>{formatNumber(result.best.confidence, 0)}%</b>
         </div>
         <div>
           <span>Совпадение профилей</span>
@@ -899,7 +1027,6 @@ export function App() {
   }, [theme]);
 
   const [config, setConfig] = useState<Config>(DEFAULT_MATCHER_CONFIG);
-  const [mode, setMode] = useState<ViewMode>("operator");
   const [inputMode, setInputMode] = useState<InputMode>("simulation");
   const [rawNmeaText, setRawNmeaText] = useState("");
   const [importedResult, setImportedResult] = useState<TerrainMatchResult | null>(null);
@@ -1057,8 +1184,6 @@ export function App() {
         </div>
         <div className="top-status"><Signal size={15} /> РВ + 1500 М + ЦМР / КОРРЕЛЯЦИОННЫЙ ПОИСК</div>
         <div className="top-actions">
-          <button className={mode === "operator" ? "active" : ""} type="button" onClick={() => setMode("operator")}>Оператор</button>
-          <button className={mode === "method" ? "active" : ""} type="button" onClick={() => setMode("method")}>Методика</button>
           <ThemeToggle theme={theme} onChange={setTheme} />
           <MiniButton
             icon={isReplayPaused ? <Play size={17} /> : <Pause size={17} />}
@@ -1205,29 +1330,25 @@ export function App() {
         </aside>
 
         <section className="center-stage">
-          {mode === "operator" ? (
-            result && currentPoint ? (
-              <>
-                <StatusStrip result={result} />
-                <FlightPreview3D
-                  result={result}
-                  replayState={replayState}
-                  replaySpeedMultiplier={replaySpeedMultiplier}
-                  isReplayPaused={isReplayPaused}
-                  onReplayChange={handleReplayChange}
-                  theme={theme}
-                />
-                <SatelliteMap result={result} currentPoint={currentPoint} />
-                <div className="bottom-grid">
-                  <NmeaStream result={result} currentIndex={currentIndex} />
-                  <TerrainProfile result={result} />
-                </div>
-              </>
-            ) : (
-              <NmeaAwaitingState rawText={rawNmeaText} error={nmeaError} />
-            )
+          {result && currentPoint ? (
+            <>
+              <StatusStrip result={result} />
+              <FlightPreview3D
+                result={result}
+                replayState={replayState}
+                replaySpeedMultiplier={replaySpeedMultiplier}
+                isReplayPaused={isReplayPaused}
+                onReplayChange={handleReplayChange}
+                theme={theme}
+              />
+              <SatelliteMap result={result} currentPoint={currentPoint} />
+              <div className="bottom-grid">
+                <NmeaStream result={result} currentIndex={currentIndex} />
+                <TerrainProfile result={result} />
+              </div>
+            </>
           ) : (
-            <MethodologyMode />
+            <NmeaAwaitingState rawText={rawNmeaText} error={nmeaError} />
           )}
         </section>
 
@@ -1264,7 +1385,7 @@ export function App() {
                 currentElapsedS={currentElapsedS}
                 currentAglM={currentAglM}
               />
-              <AlgorithmOutputPanel result={result} />
+              <AlgorithmOutputPanel result={result} currentPoint={currentPoint} currentElapsedS={currentElapsedS} />
               <ValidationPanel result={result} />
             </>
           ) : (
