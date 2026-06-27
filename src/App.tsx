@@ -1175,7 +1175,7 @@ function ThemeToggle({ theme, onChange }: { theme: ThemeMode; onChange: (t: Them
 
 export function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => {
-    return (localStorage.getItem("theme") as ThemeMode | null) ?? "dark";
+    return (localStorage.getItem("theme") as ThemeMode | null) ?? "light";
   });
 
   useEffect(() => {

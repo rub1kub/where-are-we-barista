@@ -24,19 +24,21 @@ function applyTheme3D(
   horizon: THREE.Mesh | null,
   ambient: THREE.HemisphereLight | null,
 ) {
-  const skyDark = 0x071018;
-  const skyLight = 0x87c5e8;
+  // Light: Desert Sand sky — warm overcast haze
+  // Dark:  Night olive — deep jungle canopy darkness
+  const skyLight = 0xC8C4BB;  // Concrete Grey / Desert Sand haze
+  const skyDark  = 0x171910;  // Deep olive night
   const sky = isLight ? skyLight : skyDark;
   scene.background = new THREE.Color(sky);
   if (scene.fog instanceof THREE.FogExp2) {
     scene.fog.color.set(sky);
-    scene.fog.density = isLight ? 0.095 : 0.10;
+    scene.fog.density = isLight ? 0.088 : 0.10;
   }
-  if (horizon) (horizon.material as THREE.MeshBasicMaterial).color.set(isLight ? 0x7ab8d8 : 0x0a1c14);
+  if (horizon) (horizon.material as THREE.MeshBasicMaterial).color.set(isLight ? 0xBCB8AE : 0x111309);
   if (ambient) {
-    ambient.color.set(isLight ? 0xd4eeff : 0xc8f7e7);
-    ambient.groundColor.set(isLight ? 0x6b9e5c : 0x17231c);
-    ambient.intensity = isLight ? 2.1 : 1.75;
+    ambient.color.set(isLight ? 0xE8E2D4 : 0x8B9A56);      // warm sand / olive glow
+    ambient.groundColor.set(isLight ? 0x6B6A4A : 0x28371B); // dusty khaki / jungle floor
+    ambient.intensity = isLight ? 2.0 : 1.70;
   }
 }
 
@@ -517,14 +519,14 @@ export function FlightPreview3D({
     renderer.toneMappingExposure = 0.95;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x071018);
-    scene.fog = new THREE.FogExp2(0x071018, 0.10);
+    scene.background = new THREE.Color(0xC8C4BB);
+    scene.fog = new THREE.FogExp2(0xC8C4BB, 0.088);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 120);
     camera.position.set(-6, 7.5, 10);
 
-    const ambient = new THREE.HemisphereLight(0xc8f7e7, 0x17231c, 1.75);
+    const ambient = new THREE.HemisphereLight(0xE8E2D4, 0x6B6A4A, 2.0);
     ambientRef.current = ambient;
     scene.add(ambient);
     const sun = new THREE.DirectionalLight(0xf8fff4, 2.35);
