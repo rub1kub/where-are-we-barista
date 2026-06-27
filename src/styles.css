@@ -148,8 +148,9 @@ button { color: inherit; cursor: pointer; }
 
 .brand-block {
   display: flex;
+  flex-direction: row-reverse;
   align-items: center;
-  gap: 13px;
+  gap: 11px;
 }
 
 .brand-icon {
@@ -161,25 +162,13 @@ button { color: inherit; cursor: pointer; }
   border: 1px solid var(--accent-border);
   background: var(--accent-faint);
   color: var(--accent);
-  transition: box-shadow var(--t);
 }
 
-.brand-icon:hover { box-shadow: var(--accent-glow); }
-
-.brand-block strong {
-  display: block;
-  font-size: 16px;
+.brand-name {
+  font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--text-2);
-}
-
-.brand-block span {
-  display: block;
-  margin-top: 1px;
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.03em;
 }
 
 .top-status {

@@ -1013,10 +1013,7 @@ export function App() {
       <header className="ops-topbar">
         <div className="brand-block">
           <div className="brand-icon"><MapPinned size={24} /></div>
-          <div>
-            <strong>КРОТ</strong>
-            <span>команда «Где мы, Бариста?»</span>
-          </div>
+          <strong className="brand-name">КРОТ</strong>
         </div>
         <div className="top-status"><Signal size={15} /> РЕЛЬЕФНАЯ НАВИГАЦИЯ / ГНСС НЕДОСТУПНА</div>
         <div className="top-actions">
