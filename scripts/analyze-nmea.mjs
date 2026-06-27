@@ -107,13 +107,24 @@ const result = solveFromNmea(text, {
 });
 const finalPoint = result.estimatedPath[result.estimatedPath.length - 1];
 const finalWgs84 = finalPoint ? localPointToWgs84(finalPoint) : null;
+const fixUsable = result.autopilotOutput.fixUsable;
+const bestCandidate = {
+  local_x_m: Math.round(result.autopilotOutput.localXM),
+  local_y_m: Math.round(result.autopilotOutput.localYM),
+  lat: finalWgs84 ? Number(finalWgs84.lat.toFixed(6)) : null,
+  lon: finalWgs84 ? Number(finalWgs84.lon.toFixed(6)) : null,
+  ground_speed_mps: result.autopilotOutput.groundSpeedMps,
+  azimuth_deg: result.autopilotOutput.azimuthDeg,
+};
 const output = {
   source_file: request.file,
   truth: "unavailable",
+  fix_usable: fixUsable,
   navigation_status: result.navigationStatus,
   status_reason: result.statusReason,
   samples: result.samples.length,
-  route_length_m: Math.round(routeLengthM(result.estimatedPath)),
+  route_length_m: fixUsable ? Math.round(routeLengthM(result.estimatedPath)) : null,
+  diagnostic_route_length_m: Math.round(routeLengthM(result.estimatedPath)),
   best_corr: Number(result.best.correlation.toFixed(4)),
   second_corr: result.secondCorrelation === null ? null : Number(result.secondCorrelation.toFixed(4)),
   ambiguity_margin: Number(result.ambiguity.toFixed(4)),
@@ -121,14 +132,15 @@ const output = {
   confidence: result.autopilotOutput.confidence,
   terrain_std_m: Number(result.terrainStdM.toFixed(1)),
   compute_ms: Math.round(result.computeMs),
-  local_x_m: Math.round(result.autopilotOutput.localXM),
-  local_y_m: Math.round(result.autopilotOutput.localYM),
-  lat: finalWgs84 ? Number(finalWgs84.lat.toFixed(6)) : null,
-  lon: finalWgs84 ? Number(finalWgs84.lon.toFixed(6)) : null,
-  ground_speed_mps: result.autopilotOutput.groundSpeedMps,
-  azimuth_deg: result.autopilotOutput.azimuthDeg,
+  local_x_m: fixUsable ? bestCandidate.local_x_m : null,
+  local_y_m: fixUsable ? bestCandidate.local_y_m : null,
+  lat: fixUsable ? bestCandidate.lat : null,
+  lon: fixUsable ? bestCandidate.lon : null,
+  ground_speed_mps: fixUsable ? bestCandidate.ground_speed_mps : null,
+  azimuth_deg: fixUsable ? bestCandidate.azimuth_deg : null,
   uncertainty_m: result.autopilotOutput.uncertaintyM,
   course_correction_deg: result.autopilotOutput.courseCorrectionDeg,
+  best_candidate: bestCandidate,
   nmea_quality: result.nmeaQuality,
   dem: {
     source_name: COPERNICUS_TAIGA_DEM.sourceName,
@@ -163,12 +175,17 @@ if (request.json) {
   console.log(\`совпадение: \${output.best_corr} / второй пик \${output.second_corr}\`);
   console.log(\`зазор: \${output.ambiguity_margin}\`);
   console.log(\`ошибка профиля: \${output.profile_rmse_m} м\`);
-  console.log(\`достоверность: \${output.confidence}\`);
+  console.log(\`доверие к расчёту: \${output.confidence}\`);
   console.log(\`время расчёта: \${output.compute_ms} мс\`);
-  console.log(\`локально: X \${output.local_x_m} м / Y \${output.local_y_m} м\`);
-  console.log(\`wgs84: \${output.lat}, \${output.lon}\`);
-  console.log(\`Vпут: \${output.ground_speed_mps} м/с\`);
-  console.log(\`азимут: \${output.azimuth_deg}°\`);
+  console.log(\`навигационная выдача: \${output.fix_usable ? "доступна" : "не выдана"}\`);
+  if (output.fix_usable) {
+    console.log(\`локально: X \${output.local_x_m} м / Y \${output.local_y_m} м\`);
+    console.log(\`wgs84: \${output.lat}, \${output.lon}\`);
+    console.log(\`Vпут: \${output.ground_speed_mps} м/с\`);
+    console.log(\`азимут: \${output.azimuth_deg}°\`);
+  } else {
+    console.log(\`диагностический кандидат: X \${output.best_candidate.local_x_m} м / Y \${output.best_candidate.local_y_m} м / \${output.best_candidate.ground_speed_mps} м/с / \${output.best_candidate.azimuth_deg}°\`);
+  }
   console.log(\`поправка курса: \${output.course_correction_deg === null ? "н/д" : output.course_correction_deg + "°"}\`);
   console.log(\`карта высот: \${output.dem.source_name} / \${output.dem.grid.width}x\${output.dem.grid.height}\`);
 }

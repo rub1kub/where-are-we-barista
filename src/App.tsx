@@ -126,11 +126,11 @@ function statusClass(status: NavigationStatus): string {
 
 function statusLabel(status: NavigationStatus): string {
   switch (status) {
-    case "FIX VALID":    return "РЕШЕНИЕ НАДЁЖНО";
-    case "FIX DEGRADED": return "РЕШЕНИЕ СНИЖЕНО";
-    case "FIX AMBIGUOUS": return "НЕОДНОЗНАЧНО";
+    case "FIX VALID":    return "МЕСТО НАЙДЕНО";
+    case "FIX DEGRADED": return "ПРИВЯЗКА НЕТОЧНАЯ";
+    case "FIX AMBIGUOUS": return "НЕСКОЛЬКО ВАРИАНТОВ";
     case "LOW RELIEF":   return "СЛАБЫЙ РЕЛЬЕФ";
-    case "NO FIX":       return "НЕТ РЕШЕНИЯ";
+    case "NO FIX":       return "МЕСТО НЕ НАЙДЕНО";
   }
 }
 
@@ -140,11 +140,11 @@ function eventLabel(code: string): string {
     case "PROFILE_WINDOW_READY": return "Окно профиля готово";
     case "SEARCH_STARTED":       return "Поиск запущен";
     case "BEST_CANDIDATE":       return "Кандидат найден";
-    case "FIX_VALID":            return "Решение надёжно";
-    case "FIX_DEGRADED":         return "Решение снижено";
-    case "FIX_AMBIGUOUS":        return "Неоднозначно";
+    case "FIX_VALID":            return "Место найдено";
+    case "FIX_DEGRADED":         return "Привязка неточная";
+    case "FIX_AMBIGUOUS":        return "Несколько вариантов";
     case "LOW_RELIEF":           return "Слабый рельеф";
-    case "NO_FIX":               return "Нет решения";
+    case "NO_FIX":               return "Место не найдено";
     default:                     return code;
   }
 }
@@ -660,7 +660,7 @@ function StatusStrip({ result }: { result: TerrainMatchResult }) {
       </div>
       <div>
         <span>вход</span>
-        <strong>РВ + ЦМР</strong>
+        <strong>РВ + карта высот</strong>
       </div>
       <div>
         <span>Совпадение</span>
@@ -671,7 +671,7 @@ function StatusStrip({ result }: { result: TerrainMatchResult }) {
         <strong>{formatMeters(result.best.rmseM)}</strong>
       </div>
       <div>
-        <span>достоверность</span>
+        <span>доверие</span>
         <strong>{result.best.confidence}%</strong>
       </div>
     </section>
@@ -693,6 +693,8 @@ function SolutionPanel({
 }) {
   const currentWgs = localPointToWgs84(currentPoint);
   const confidence = result.best.confidence;
+  const fixUsable = result.autopilotOutput.fixUsable;
+  const primaryValue = (value: string) => fixUsable ? value : "не выдано";
 
   return (
     <aside className="solution-card">
@@ -702,24 +704,24 @@ function SolutionPanel({
         <p>{result.statusReason}</p>
       </div>
       <div className="coordinates">
-        <b>{formatCoord(currentWgs.lat, "lat")}</b>
-        <b>{formatCoord(currentWgs.lon, "lon")}</b>
+        <b>{primaryValue(formatCoord(currentWgs.lat, "lat"))}</b>
+        <b>{primaryValue(formatCoord(currentWgs.lon, "lon"))}</b>
       </div>
       <div className="local-coordinates">
         <span>Локальные координаты карты высот</span>
         <div>
-          <b>X {formatNumber(currentPoint.x, 0)} м</b>
-          <b>Y {formatNumber(currentPoint.y, 0)} м</b>
+          <b>{primaryValue(`X ${formatNumber(currentPoint.x, 0)} м`)}</b>
+          <b>{primaryValue(`Y ${formatNumber(currentPoint.y, 0)} м`)}</b>
         </div>
       </div>
       <div className="decision-grid">
         <div>
           <span>Путевая скорость</span>
-          <strong>{formatNumber(result.best.speedMps, 1)} м/с</strong>
+          <strong>{primaryValue(`${formatNumber(result.best.speedMps, 1)} м/с`)}</strong>
         </div>
         <div>
           <span>Азимут</span>
-          <strong>{formatNumber(result.best.azimuthDeg, 0)}°</strong>
+          <strong>{primaryValue(`${formatNumber(result.best.azimuthDeg, 0)}°`)}</strong>
         </div>
         <div>
           <span>Высота над землёй</span>
@@ -730,9 +732,18 @@ function SolutionPanel({
           <strong>{formatMeters(currentDistanceM)}</strong>
         </div>
       </div>
+      {!fixUsable ? (
+        <div className="local-coordinates">
+          <span>Диагностический кандидат</span>
+          <div>
+            <b>X {formatNumber(currentPoint.x, 0)} м</b>
+            <b>Y {formatNumber(currentPoint.y, 0)} м</b>
+          </div>
+        </div>
+      ) : null}
       <div className="confidence">
         <div>
-          <span>Достоверность</span>
+          <span>Доверие</span>
           <strong>{confidence}%</strong>
         </div>
         <i><em style={{ width: `${confidence}%` }} /></i>
@@ -859,20 +870,20 @@ function ValidationPanel({ result }: { result: TerrainMatchResult }) {
     <section className="panel facts-panel">
       <header>
         <div>
-          <span>Валидация</span>
+          <span>Проверка</span>
           <h3>Метрики</h3>
         </div>
         <CheckCircle2 size={22} />
       </header>
       <div className="fact-list">
-        <div><Gauge size={17} /><span>Пик корреляции: <b>{result.best.correlation.toFixed(3)}</b></span></div>
+        <div><Gauge size={17} /><span>Пик совпадения: <b>{result.best.correlation.toFixed(3)}</b></span></div>
         <div><Gauge size={17} /><span>Второй пик: <b>{result.secondCorrelation?.toFixed(3) ?? "н/д"}</b></span></div>
         <div><Activity size={17} /><span>Разрыв пиков: <b>{result.ambiguity.toFixed(3)}</b></span></div>
         <div><Activity size={17} /><span>Ошибка профиля: <b>{formatMeters(result.best.rmseM)}</b></span></div>
         <div><Clock3 size={17} /><span>Время расчёта: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
-        <div><Gauge size={17} /><span>Достоверность: <b>{result.best.confidence}%</b></span></div>
+        <div><Gauge size={17} /><span>Доверие к расчёту: <b>{result.best.confidence}%</b></span></div>
         <div><AlertTriangle size={17} /><span>Изменчивость рельефа: <b>{formatMetric(result.terrainStdM, 1, "м")}</b></span></div>
-        <div><AlertTriangle size={17} /><span>Контрольная сумма НМЕА: <b>{result.nmeaQuality.checksumInvalid > 0 ? `${result.nmeaQuality.checksumInvalid} ошибок` : "норма"}</b></span></div>
+        <div><AlertTriangle size={17} /><span>Контрольная сумма NMEA: <b>{result.nmeaQuality.checksumInvalid > 0 ? `${result.nmeaQuality.checksumInvalid} ошибок` : "норма"}</b></span></div>
         {result.truthAvailable ? (
           <>
             <div><Activity size={17} /><span>Ошибка скорости: <b>{formatMetric(result.speedErrorMps, 1, "м/с")}</b></span></div>
@@ -889,6 +900,8 @@ function ValidationPanel({ result }: { result: TerrainMatchResult }) {
 }
 
 function AlgorithmOutputPanel({ result, output }: { result: TerrainMatchResult; output: AutopilotOutput }) {
+  const primaryValue = (value: string) => output.fixUsable ? value : "не выдано";
+
   return (
     <section className="panel autopilot-panel">
       <header>
@@ -901,30 +914,30 @@ function AlgorithmOutputPanel({ result, output }: { result: TerrainMatchResult; 
       <div className="output-grid">
         <div>
           <span>X локальный</span>
-          <b>{formatNumber(output.localXM, 0)} м</b>
+          <b>{primaryValue(`${formatNumber(output.localXM, 0)} м`)}</b>
         </div>
         <div>
           <span>Y локальный</span>
-          <b>{formatNumber(output.localYM, 0)} м</b>
+          <b>{primaryValue(`${formatNumber(output.localYM, 0)} м`)}</b>
         </div>
         <div>
           <span>Широта</span>
-          <b>{formatCoord(output.lat, "lat")}</b>
+          <b>{primaryValue(formatCoord(output.lat, "lat"))}</b>
         </div>
         <div>
           <span>Долгота</span>
-          <b>{formatCoord(output.lon, "lon")}</b>
+          <b>{primaryValue(formatCoord(output.lon, "lon"))}</b>
         </div>
         <div>
           <span>Путевая скорость</span>
-          <b>{formatNumber(output.groundSpeedMps, 1)} м/с</b>
+          <b>{primaryValue(`${formatNumber(output.groundSpeedMps, 1)} м/с`)}</b>
         </div>
         <div>
           <span>Азимут</span>
-          <b>{formatNumber(output.azimuthDeg, 0)}°</b>
+          <b>{primaryValue(`${formatNumber(output.azimuthDeg, 0)}°`)}</b>
         </div>
         <div>
-          <span>Достоверность</span>
+          <span>Доверие к расчёту</span>
           <b>{formatNumber(output.confidence, 2)}</b>
         </div>
         <div>
@@ -953,8 +966,16 @@ function AlgorithmOutputPanel({ result, output }: { result: TerrainMatchResult; 
         </div>
         <div className="wide">
           <span>Основа расчёта</span>
-          <b>РВ + 1500 м + ЦМР</b>
+          <b>РВ + 1500 м + карта высот</b>
         </div>
+        {!output.fixUsable ? (
+          <div className="wide">
+            <span>Диагностический кандидат</span>
+            <b>
+              X {formatNumber(output.localXM, 0)} м · Y {formatNumber(output.localYM, 0)} м · {formatNumber(output.groundSpeedMps, 1)} м/с · {formatNumber(output.azimuthDeg, 0)}°
+            </b>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -1283,7 +1304,7 @@ export function App() {
           <div className="brand-icon"><MapPinned size={24} /></div>
           <strong className="brand-name">КРОТ</strong>
         </div>
-        <div className="top-status"><Signal size={15} /> РВ + 1500 М + ЦМР / КОРРЕЛЯЦИОННЫЙ ПОИСК</div>
+        <div className="top-status"><Signal size={15} /> РВ + 1500 М + КАРТА ВЫСОТ / КОРРЕЛЯЦИОННЫЙ ПОИСК</div>
         <div className="top-actions">
           <button className={mode === "operator" ? "active" : ""} type="button" onClick={() => setMode("operator")}>Оператор</button>
           <button className={mode === "method" ? "active" : ""} type="button" onClick={() => setMode("method")}>Методика</button>

@@ -59,6 +59,7 @@ export type AlgorithmEvent = {
 };
 
 export type AutopilotOutput = {
+  fixUsable: boolean;
   localXM: number;
   localYM: number;
   lat: number;
@@ -431,6 +432,10 @@ function statusToEventCode(status: NavigationStatus): AlgorithmEventCode {
   return "NO_FIX";
 }
 
+export function isNavigationFixUsable(status: NavigationStatus): boolean {
+  return status === "FIX VALID" || status === "FIX DEGRADED";
+}
+
 function estimateUncertaintyM(
   status: NavigationStatus,
   confidence: number,
@@ -438,7 +443,7 @@ function estimateUncertaintyM(
   rmseM: number,
   terrainStdM: number,
 ): number | null {
-  if (status === "NO FIX") return null;
+  if (!isNavigationFixUsable(status)) return null;
   const confidencePenaltyM = (100 - confidence) * 8;
   const ambiguityPenaltyM = ambiguity > 0 ? clamp(0.018 / ambiguity, 0, 8) * 85 : 680;
   const reliefPenaltyM = terrainStdM > 0 ? clamp(18 / terrainStdM, 0, 4) * 55 : 220;
@@ -488,6 +493,7 @@ export function buildAutopilotOutputAtPoint(
   const point = currentPoint ?? { t: 0, x: 0, y: 0, elevationM: 0 };
   const wgs = localPointToWgs84(point);
   return {
+    fixUsable: isNavigationFixUsable(navigationStatus),
     localXM: point.x,
     localYM: point.y,
     lat: wgs.lat,
