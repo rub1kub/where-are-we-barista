@@ -718,7 +718,7 @@ export function FlightPreview3D({
           <span>H MSL {Math.round(result.config.baroAltitudeM)} м</span>
           <span>Над землёй {Math.round(agl)} м</span>
           <span>Скорость {result.best.speedMps.toFixed(1)} м/с</span>
-          <span>{result.truthAvailable ? "Стенд" : "Журнал НМЕА"}</span>
+          <span>{result.truthAvailable ? "Стенд" : "Журнал NMEA"}</span>
           <span>T+ {Math.round(replayState?.elapsedS ?? 0)} с</span>
           <span>{isReplayPaused ? "Пауза" : `Прокрутка x${replaySpeedMultiplier}`} · {replayDurationMin} мин</span>
         </div>

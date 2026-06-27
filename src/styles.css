@@ -871,7 +871,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .route-found-path {
   fill: none;
   stroke: var(--route-green);
-  stroke-width: 4;
+  stroke-width: 3.5;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 9 8;
@@ -893,6 +893,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .map-label,
 .map-scale,
+.map-coordinate-label,
 .elevation-range text {
   fill: #f4fffd;
   paint-order: stroke;
@@ -904,9 +905,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 [data-theme="light"] .map-label,
 [data-theme="light"] .map-scale,
+[data-theme="light"] .map-coordinate-label,
 [data-theme="light"] .elevation-range text { fill: #0f172a; stroke: rgba(255,255,255,0.75); }
 
 .map-scale { font-size: 11px; font-weight: 600; }
+.map-coordinate-label,
 .elevation-range text {
   font-size: 11px;
   font-weight: 800;

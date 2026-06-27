@@ -59,6 +59,7 @@ export type AlgorithmEvent = {
 };
 
 export type AutopilotOutput = {
+  fixUsable: boolean;
   localXM: number;
   localYM: number;
   lat: number;
@@ -142,7 +143,7 @@ export const TAIGA_ROUTE = {
   startName: "Ванавара",
   finishName: "лагерь",
   riverName: "Подкаменная Тунгуска",
-  demName: "Copernicus DEM GLO-30 / сэмпл ЦМР",
+  demName: "Copernicus GLO-30 / карта высот",
   start: {
     lat: 60.3446,
     lon: 102.2797,
@@ -431,6 +432,10 @@ function statusToEventCode(status: NavigationStatus): AlgorithmEventCode {
   return "NO_FIX";
 }
 
+export function isNavigationFixUsable(status: NavigationStatus): boolean {
+  return status === "FIX VALID" || status === "FIX DEGRADED";
+}
+
 function estimateUncertaintyM(
   status: NavigationStatus,
   confidence: number,
@@ -438,7 +443,7 @@ function estimateUncertaintyM(
   rmseM: number,
   terrainStdM: number,
 ): number | null {
-  if (status === "NO FIX") return null;
+  if (!isNavigationFixUsable(status)) return null;
   const confidencePenaltyM = (100 - confidence) * 8;
   const ambiguityPenaltyM = ambiguity > 0 ? clamp(0.018 / ambiguity, 0, 8) * 85 : 680;
   const reliefPenaltyM = terrainStdM > 0 ? clamp(18 / terrainStdM, 0, 4) * 55 : 220;
@@ -446,16 +451,13 @@ function estimateUncertaintyM(
 }
 
 function estimateCourseCorrectionDeg(
-  estimatedPath: MatchPoint[],
+  currentPoint: MatchPoint,
   currentAzimuthDeg: number,
   navigationStatus: NavigationStatus,
   config: SolverConfig,
 ): number | null {
   if (navigationStatus !== "FIX VALID" && navigationStatus !== "FIX DEGRADED") return null;
   if (config.plannedAzimuthDeg === undefined) return null;
-
-  const currentPoint = estimatedPath[estimatedPath.length - 1];
-  if (!currentPoint) return null;
 
   const plannedAzimuthDeg = normalizeDeg(config.plannedAzimuthDeg);
   const plannedAzimuth = degToRad(plannedAzimuthDeg);
@@ -480,6 +482,31 @@ function estimateCourseCorrectionDeg(
   return Math.abs(roundedCorrectionDeg) < 0.05 ? 0 : roundedCorrectionDeg;
 }
 
+export function buildAutopilotOutputAtPoint(
+  currentPoint: MatchPoint | null | undefined,
+  best: MatchCandidate,
+  navigationStatus: NavigationStatus,
+  terrainStdM: number,
+  ambiguity: number,
+  config: SolverConfig,
+): AutopilotOutput {
+  const point = currentPoint ?? { t: 0, x: 0, y: 0, elevationM: 0 };
+  const wgs = localPointToWgs84(point);
+  return {
+    fixUsable: isNavigationFixUsable(navigationStatus),
+    localXM: point.x,
+    localYM: point.y,
+    lat: wgs.lat,
+    lon: wgs.lon,
+    groundSpeedMps: best.speedMps,
+    azimuthDeg: best.azimuthDeg,
+    confidence: best.confidence / 100,
+    uncertaintyM: estimateUncertaintyM(navigationStatus, best.confidence, ambiguity, best.rmseM, terrainStdM),
+    courseCorrectionDeg: estimateCourseCorrectionDeg(point, best.azimuthDeg, navigationStatus, config),
+    navigationStatus,
+  };
+}
+
 function buildAutopilotOutput(
   estimatedPath: MatchPoint[],
   best: MatchCandidate,
@@ -488,20 +515,14 @@ function buildAutopilotOutput(
   ambiguity: number,
   config: SolverConfig,
 ): AutopilotOutput {
-  const finalPoint = estimatedPath[estimatedPath.length - 1] ?? { x: 0, y: 0 };
-  const wgs = localPointToWgs84(finalPoint);
-  return {
-    localXM: finalPoint.x,
-    localYM: finalPoint.y,
-    lat: wgs.lat,
-    lon: wgs.lon,
-    groundSpeedMps: best.speedMps,
-    azimuthDeg: best.azimuthDeg,
-    confidence: best.confidence / 100,
-    uncertaintyM: estimateUncertaintyM(navigationStatus, best.confidence, ambiguity, best.rmseM, terrainStdM),
-    courseCorrectionDeg: estimateCourseCorrectionDeg(estimatedPath, best.azimuthDeg, navigationStatus, config),
+  return buildAutopilotOutputAtPoint(
+    estimatedPath[estimatedPath.length - 1],
+    best,
     navigationStatus,
-  };
+    terrainStdM,
+    ambiguity,
+    config,
+  );
 }
 
 function summarizeNmeaQuality(samples: RadioAltimeterSample[]): NmeaQuality {

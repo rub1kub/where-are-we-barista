@@ -24,6 +24,8 @@ import {
   NavigationStatus,
   TAIGA_ROUTE,
   TerrainMatchResult,
+  type AutopilotOutput,
+  buildAutopilotOutputAtPoint,
   localPointToWgs84,
   routeLengthM,
   runTerrainMatching,
@@ -32,6 +34,7 @@ import {
 } from "./terrainMatcher";
 
 type Config = typeof DEFAULT_MATCHER_CONFIG;
+type ViewMode = "operator" | "method";
 type InputMode = "simulation" | "nmea";
 type NmeaInputState = "empty" | "dirty" | "ready" | "error";
 type ThemeMode = "light" | "dark" | "system";
@@ -79,6 +82,10 @@ function formatMetric(value: number | null, digits = 0, unit = ""): string {
   return `${formatNumber(value, digits)}${unit ? ` ${unit}` : ""}`;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 function statusClass(status: NavigationStatus): string {
   if (status === "FIX VALID") return "ok";
   if (status === "FIX DEGRADED" || status === "FIX AMBIGUOUS") return "warn";
@@ -87,11 +94,11 @@ function statusClass(status: NavigationStatus): string {
 
 function statusLabel(status: NavigationStatus): string {
   switch (status) {
-    case "FIX VALID":    return "РЕШЕНИЕ НАДЁЖНО";
-    case "FIX DEGRADED": return "РЕШЕНИЕ СНИЖЕНО";
-    case "FIX AMBIGUOUS": return "НЕОДНОЗНАЧНО";
+    case "FIX VALID":    return "МЕСТО НАЙДЕНО";
+    case "FIX DEGRADED": return "ПРИВЯЗКА НЕТОЧНАЯ";
+    case "FIX AMBIGUOUS": return "НЕСКОЛЬКО ВАРИАНТОВ";
     case "LOW RELIEF":   return "СЛАБЫЙ РЕЛЬЕФ";
-    case "NO FIX":       return "НЕТ РЕШЕНИЯ";
+    case "NO FIX":       return "МЕСТО НЕ НАЙДЕНО";
   }
 }
 
@@ -101,11 +108,11 @@ function eventLabel(code: string): string {
     case "PROFILE_WINDOW_READY": return "Окно профиля готово";
     case "SEARCH_STARTED":       return "Поиск запущен";
     case "BEST_CANDIDATE":       return "Кандидат найден";
-    case "FIX_VALID":            return "Решение надёжно";
-    case "FIX_DEGRADED":         return "Решение снижено";
-    case "FIX_AMBIGUOUS":        return "Неоднозначно";
+    case "FIX_VALID":            return "Место найдено";
+    case "FIX_DEGRADED":         return "Привязка неточная";
+    case "FIX_AMBIGUOUS":        return "Несколько вариантов";
     case "LOW_RELIEF":           return "Слабый рельеф";
-    case "NO_FIX":               return "Нет решения";
+    case "NO_FIX":               return "Место не найдено";
     default:                     return code;
   }
 }
@@ -327,7 +334,7 @@ type ElevationCell = {
 };
 
 function terrainColor(value: number, min: number, max: number) {
-  const t = Math.max(0, Math.min(1, (value - min) / Math.max(1, max - min)));
+  const t = clamp((value - min) / Math.max(1, max - min), 0, 1);
   const stops = [
     { t: 0, rgb: [20, 72, 161] },
     { t: 0.25, rgb: [14, 165, 183] },
@@ -429,7 +436,7 @@ function pointWithDisplayCurve(path: MatchPoint[], point: MatchPoint, index: num
   const length = Math.hypot(dx, dy);
   if (length < 1) return point;
 
-  const progress = Math.max(0, Math.min(1, index / Math.max(1, path.length - 1)));
+  const progress = clamp(index / Math.max(1, path.length - 1), 0, 1);
   const taper = Math.sin(Math.PI * progress);
   const offset =
     taper *
@@ -476,7 +483,6 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
   }, [result]);
   const start = basePath[0];
   const finish = basePath[basePath.length - 1];
-  const startWgs = localPointToWgs84(start);
   const truthD = result.truthAvailable ? buildRoutePath(result.truthPath, bounds, 3600) : "";
   const estimateD = buildRoutePath(result.estimatedPath, bounds);
   const startPoint = pointOnMap(start, bounds);
@@ -487,7 +493,7 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
     <section className="map-shell">
       <div className="map-head">
         <div>
-          <span>Карта высот ЦМР + траектория</span>
+          <span>Карта высот + траектория</span>
           <h2>{TAIGA_ROUTE.routeName}</h2>
         </div>
         <div className="map-legend">
@@ -497,7 +503,7 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
           <span><i className="route-found" /> оценка алгоритма</span>
         </div>
       </div>
-      <svg className="satellite-map elevation-map" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} role="img" aria-label="Карта высот ЦМР с траекторией полёта">
+      <svg className="satellite-map elevation-map" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} role="img" aria-label="Карта высот с найденной траекторией">
         <defs>
           <filter id="routeBlur">
             <feGaussianBlur stdDeviation="3" />
@@ -526,7 +532,7 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
             <line key={`v-${index}`} x1={(index + 1) * (MAP_WIDTH / 9)} x2={(index + 1) * (MAP_WIDTH / 9)} y1="0" y2={MAP_HEIGHT} />
           ))}
           {Array.from({ length: 4 }, (_, index) => (
-            <line key={`h-${index}`} x1="0" x2={MAP_WIDTH} y1={(index + 1) * (MAP_HEIGHT / 5)} y2={(index + 1) * (MAP_HEIGHT / 5)} />
+            <line key={`h-${index}`} x1="0" x2={MAP_WIDTH} y1={(index + 1) * (MAP_HEIGHT / 5)} y2={MAP_HEIGHT / 5 * (index + 1)} />
           ))}
         </g>
         {result.truthAvailable ? <path d={truthD} className="route-shadow" filter="url(#routeBlur)" /> : null}
@@ -539,6 +545,9 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
         <text x={startPoint.x + 14} y={startPoint.y - 12} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.startName : "старт оценки"}</text>
         <text x={finishPoint.x + 15} y={finishPoint.y + 5} className="map-label">{result.truthAvailable ? TAIGA_ROUTE.finishName : "оценка"}</text>
         <text x={currentMapPoint.x + 13} y={currentMapPoint.y - 11} className="map-label">текущая оценка</text>
+        <text x={currentMapPoint.x + 13} y={currentMapPoint.y + 9} className="map-coordinate-label">
+          X {formatNumber(currentPoint.x, 0)} м · Y {formatNumber(currentPoint.y, 0)} м
+        </text>
         <g className="elevation-range">
           <text x="32" y="38">низины {formatNumber(elevation.minElevationM, 0)} м</text>
           <text x="32" y="58">высоты {formatNumber(elevation.maxElevationM, 0)} м</text>
@@ -549,7 +558,7 @@ function SatelliteMap({ result, currentPoint }: { result: TerrainMatchResult; cu
       <div className="map-foot">
         <span>{TAIGA_ROUTE.region}</span>
         <span>{TAIGA_ROUTE.demName}</span>
-        <span>старт {formatCoord(startWgs.lat, "lat")} · {formatCoord(startWgs.lon, "lon")}</span>
+        <span>диапазон высот {formatNumber(COPERNICUS_TAIGA_DEM.minElevationM, 0)}-{formatNumber(COPERNICUS_TAIGA_DEM.maxElevationM, 0)} м</span>
       </div>
     </section>
   );
@@ -564,18 +573,18 @@ function StatusStrip({ result }: { result: TerrainMatchResult }) {
       </div>
       <div>
         <span>вход</span>
-        <strong>РВ + ЦМР</strong>
+        <strong>РВ + карта высот</strong>
       </div>
       <div>
-        <span>corr</span>
+        <span>Совпадение</span>
         <strong>{result.best.correlation.toFixed(3)}</strong>
       </div>
       <div>
-        <span>СКО</span>
+        <span>Ошибка профиля</span>
         <strong>{formatMeters(result.best.rmseM)}</strong>
       </div>
       <div>
-        <span>достоверность</span>
+        <span>доверие</span>
         <strong>{result.best.confidence}%</strong>
       </div>
     </section>
@@ -597,6 +606,8 @@ function SolutionPanel({
 }) {
   const currentWgs = localPointToWgs84(currentPoint);
   const confidence = result.best.confidence;
+  const fixUsable = result.autopilotOutput.fixUsable;
+  const primaryValue = (value: string) => fixUsable ? value : "не выдано";
 
   return (
     <aside className="solution-card">
@@ -606,24 +617,24 @@ function SolutionPanel({
         <p>{result.statusReason}</p>
       </div>
       <div className="coordinates">
-        <b>{formatCoord(currentWgs.lat, "lat")}</b>
-        <b>{formatCoord(currentWgs.lon, "lon")}</b>
+        <b>{primaryValue(formatCoord(currentWgs.lat, "lat"))}</b>
+        <b>{primaryValue(formatCoord(currentWgs.lon, "lon"))}</b>
       </div>
       <div className="local-coordinates">
-        <span>Локальные координаты ЦМР</span>
+        <span>Локальные координаты карты высот</span>
         <div>
-          <b>X {formatNumber(currentPoint.x, 0)} м</b>
-          <b>Y {formatNumber(currentPoint.y, 0)} м</b>
+          <b>{primaryValue(`X ${formatNumber(currentPoint.x, 0)} м`)}</b>
+          <b>{primaryValue(`Y ${formatNumber(currentPoint.y, 0)} м`)}</b>
         </div>
       </div>
       <div className="decision-grid">
         <div>
           <span>Путевая скорость</span>
-          <strong>{formatNumber(result.best.speedMps, 1)} м/с</strong>
+          <strong>{primaryValue(`${formatNumber(result.best.speedMps, 1)} м/с`)}</strong>
         </div>
         <div>
           <span>Азимут</span>
-          <strong>{formatNumber(result.best.azimuthDeg, 0)}°</strong>
+          <strong>{primaryValue(`${formatNumber(result.best.azimuthDeg, 0)}°`)}</strong>
         </div>
         <div>
           <span>Высота над землёй</span>
@@ -634,9 +645,18 @@ function SolutionPanel({
           <strong>{formatMeters(currentDistanceM)}</strong>
         </div>
       </div>
+      {!fixUsable ? (
+        <div className="local-coordinates">
+          <span>Диагностический кандидат</span>
+          <div>
+            <b>X {formatNumber(currentPoint.x, 0)} м</b>
+            <b>Y {formatNumber(currentPoint.y, 0)} м</b>
+          </div>
+        </div>
+      ) : null}
       <div className="confidence">
         <div>
-          <span>Достоверность</span>
+          <span>Доверие</span>
           <strong>{confidence}%</strong>
         </div>
         <i><em style={{ width: `${confidence}%` }} /></i>
@@ -660,12 +680,12 @@ function CorrelationSurface({ result }: { result: TerrainMatchResult }) {
     <section className="panel correlation-panel">
       <header>
         <div>
-          <span>Корреляция</span>
-          <h3>Поверхность кандидатов</h3>
+          <span>Тепловая карта совпадений</span>
+          <h3>Азимут и скорость</h3>
         </div>
         <strong>{result.best.correlation.toFixed(3)}</strong>
       </header>
-      <svg viewBox={`0 0 ${width} ${height}`} className="heatmap" role="img" aria-label="Карта корреляции по направлению и скорости">
+      <svg viewBox={`0 0 ${width} ${height}`} className="heatmap" role="img" aria-label="Тепловая карта совпадений по направлению и скорости">
         {result.heatmap.map((cell) => {
           const t = (cell.correlation - minCorr) / Math.max(0.001, maxCorr - minCorr);
           const x = cell.azimuthDeg * cellW;
@@ -722,7 +742,7 @@ function TerrainProfile({ result }: { result: TerrainMatchResult }) {
         </div>
         <div className="chart-legend">
           <span><i className="measured" /> измерено РВ</span>
-          <span><i className="reference" /> эталон ЦМР</span>
+          <span><i className="reference" /> эталон карты</span>
         </div>
       </header>
       <svg viewBox={`0 0 ${width} ${height}`} className="profile-chart" role="img" aria-label="Профиль рельефа">
@@ -763,20 +783,20 @@ function ValidationPanel({ result }: { result: TerrainMatchResult }) {
     <section className="panel facts-panel">
       <header>
         <div>
-          <span>Валидация</span>
+          <span>Проверка</span>
           <h3>Метрики</h3>
         </div>
         <CheckCircle2 size={22} />
       </header>
       <div className="fact-list">
-        <div><Gauge size={17} /><span>Пик корреляции: <b>{result.best.correlation.toFixed(3)}</b></span></div>
+        <div><Gauge size={17} /><span>Пик совпадения: <b>{result.best.correlation.toFixed(3)}</b></span></div>
         <div><Gauge size={17} /><span>Второй пик: <b>{result.secondCorrelation?.toFixed(3) ?? "н/д"}</b></span></div>
         <div><Activity size={17} /><span>Разрыв пиков: <b>{result.ambiguity.toFixed(3)}</b></span></div>
-        <div><Activity size={17} /><span>СКО профиля: <b>{formatMeters(result.best.rmseM)}</b></span></div>
+        <div><Activity size={17} /><span>Ошибка профиля: <b>{formatMeters(result.best.rmseM)}</b></span></div>
         <div><Clock3 size={17} /><span>Время расчёта: <b>{formatNumber(result.computeMs, 0)} мс</b></span></div>
-        <div><Gauge size={17} /><span>Достоверность: <b>{result.best.confidence}%</b></span></div>
+        <div><Gauge size={17} /><span>Доверие к расчёту: <b>{result.best.confidence}%</b></span></div>
         <div><AlertTriangle size={17} /><span>Изменчивость рельефа: <b>{formatMetric(result.terrainStdM, 1, "м")}</b></span></div>
-        <div><AlertTriangle size={17} /><span>Контрольная сумма НМЕА: <b>{result.nmeaQuality.checksumInvalid > 0 ? `${result.nmeaQuality.checksumInvalid} ошибок` : "норма"}</b></span></div>
+        <div><AlertTriangle size={17} /><span>Контрольная сумма NMEA: <b>{result.nmeaQuality.checksumInvalid > 0 ? `${result.nmeaQuality.checksumInvalid} ошибок` : "норма"}</b></span></div>
         {result.truthAvailable ? (
           <>
             <div><Activity size={17} /><span>Ошибка скорости: <b>{formatMetric(result.speedErrorMps, 1, "м/с")}</b></span></div>
@@ -792,55 +812,46 @@ function ValidationPanel({ result }: { result: TerrainMatchResult }) {
   );
 }
 
-function AlgorithmOutputPanel({
-  result,
-  currentPoint,
-  currentElapsedS,
-}: {
-  result: TerrainMatchResult;
-  currentPoint: MatchPoint;
-  currentElapsedS: number;
-}) {
-  const output = result.autopilotOutput;
-  const currentWgs = localPointToWgs84(currentPoint);
+function AlgorithmOutputPanel({ result, output }: { result: TerrainMatchResult; output: AutopilotOutput }) {
+  const primaryValue = (value: string) => output.fixUsable ? value : "не выдано";
 
   return (
     <section className="panel autopilot-panel">
       <header>
         <div>
-          <span>Выход алгоритма · T+ {formatDuration(currentElapsedS)}</span>
-          <h3>Текущая навигационная оценка</h3>
+          <span>Выход алгоритма</span>
+          <h3>Результат расчёта</h3>
         </div>
         <Signal size={22} />
       </header>
       <div className="output-grid">
         <div>
           <span>X локальный</span>
-          <b>{formatNumber(currentPoint.x, 0)} м</b>
+          <b>{primaryValue(`${formatNumber(output.localXM, 0)} м`)}</b>
         </div>
         <div>
           <span>Y локальный</span>
-          <b>{formatNumber(currentPoint.y, 0)} м</b>
+          <b>{primaryValue(`${formatNumber(output.localYM, 0)} м`)}</b>
         </div>
         <div>
           <span>Широта</span>
-          <b>{formatCoord(currentWgs.lat, "lat")}</b>
+          <b>{primaryValue(formatCoord(output.lat, "lat"))}</b>
         </div>
         <div>
           <span>Долгота</span>
-          <b>{formatCoord(currentWgs.lon, "lon")}</b>
+          <b>{primaryValue(formatCoord(output.lon, "lon"))}</b>
         </div>
         <div>
           <span>Путевая скорость</span>
-          <b>{formatNumber(output.groundSpeedMps, 1)} м/с</b>
+          <b>{primaryValue(`${formatNumber(output.groundSpeedMps, 1)} м/с`)}</b>
         </div>
         <div>
           <span>Азимут</span>
-          <b>{formatNumber(output.azimuthDeg, 0)}°</b>
+          <b>{primaryValue(`${formatNumber(output.azimuthDeg, 0)}°`)}</b>
         </div>
         <div>
-          <span>Достоверность</span>
-          <b>{formatNumber(result.best.confidence, 0)}%</b>
+          <span>Доверие к расчёту</span>
+          <b>{formatNumber(output.confidence, 2)}</b>
         </div>
         <div>
           <span>Совпадение профилей</span>
@@ -868,8 +879,16 @@ function AlgorithmOutputPanel({
         </div>
         <div className="wide">
           <span>Основа расчёта</span>
-          <b>РВ + 1500 м + ЦМР</b>
+          <b>РВ + 1500 м + карта высот</b>
         </div>
+        {!output.fixUsable ? (
+          <div className="wide">
+            <span>Диагностический кандидат</span>
+            <b>
+              X {formatNumber(output.localXM, 0)} м · Y {formatNumber(output.localYM, 0)} м · {formatNumber(output.groundSpeedMps, 1)} м/с · {formatNumber(output.azimuthDeg, 0)}°
+            </b>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -918,11 +937,11 @@ function MethodologyMode() {
       </article>
       <article>
         <strong>4. Корреляция</strong>
-        <span>Система перебирает азимут 0-359° и скорость, затем ищет максимум corr.</span>
+        <span>Система перебирает азимут 0-359° и скорость, затем ищет максимум совпадения.</span>
       </article>
       <article>
         <strong>5. Проверочный журнал</strong>
-        <span>В финале NMEA-журнал радиовысотомера загружается в этот же контур без дополнительных датчиков и truth-траектории.</span>
+        <span>Внешний NMEA загружается в этот же контур: расчётная часть получает только РВ, высоту 1500 м и карту высот Copernicus GLO-30.</span>
       </article>
       <article>
         <strong>6. 3D-реконструкция</strong>
@@ -1027,6 +1046,7 @@ export function App() {
   }, [theme]);
 
   const [config, setConfig] = useState<Config>(DEFAULT_MATCHER_CONFIG);
+  const [mode, setMode] = useState<ViewMode>("operator");
   const [inputMode, setInputMode] = useState<InputMode>("simulation");
   const [rawNmeaText, setRawNmeaText] = useState("");
   const [importedResult, setImportedResult] = useState<TerrainMatchResult | null>(null);
@@ -1055,6 +1075,20 @@ export function App() {
     result?.samples[currentIndex]?.radioAltitudeM ??
     (currentPoint && result ? result.config.baroAltitudeM - currentPoint.elevationM : 0);
   const currentDistanceM = cumulativeEstimateDistances[currentIndex] ?? 0;
+  const currentAutopilotOutput = useMemo(
+    () =>
+      result && currentPoint
+        ? buildAutopilotOutputAtPoint(
+          currentPoint,
+          result.best,
+          result.navigationStatus,
+          result.terrainStdM,
+          result.ambiguity,
+          result.config,
+        )
+        : null,
+    [currentPoint, result],
+  );
   const handleReplayChange = useCallback((state: FlightReplayState) => {
     setReplayState((current) => {
       if (
@@ -1182,8 +1216,10 @@ export function App() {
           <div className="brand-icon"><MapPinned size={24} /></div>
           <strong className="brand-name">КРОТ</strong>
         </div>
-        <div className="top-status"><Signal size={15} /> РВ + 1500 М + ЦМР / КОРРЕЛЯЦИОННЫЙ ПОИСК</div>
+        <div className="top-status"><Signal size={15} /> РВ + 1500 М + КАРТА ВЫСОТ / КОРРЕЛЯЦИОННЫЙ ПОИСК</div>
         <div className="top-actions">
+          <button className={mode === "operator" ? "active" : ""} type="button" onClick={() => setMode("operator")}>Оператор</button>
+          <button className={mode === "method" ? "active" : ""} type="button" onClick={() => setMode("method")}>Методика</button>
           <ThemeToggle theme={theme} onChange={setTheme} />
           <MiniButton
             icon={isReplayPaused ? <Play size={17} /> : <Pause size={17} />}
@@ -1234,9 +1270,9 @@ export function App() {
           <section className="rail-panel">
             <h2>Входные данные</h2>
             <InputRow
-              label="ЦМР"
+              label="Карта высот"
               value={TAIGA_ROUTE.demName}
-              help="Цифровая модель рельефа. В рабочем контуре заменяется на Copernicus GLO-30, SRTM или ALOS."
+              help="Таблица высот земли по району. В рабочем контуре заменяется на Copernicus GLO-30, SRTM или ALOS."
             />
             <InputRow
               label="Высота MSL"
@@ -1280,7 +1316,7 @@ export function App() {
                   max={359}
                   step={1}
                   unit="°"
-                  help="Параметр стенда. Итоговый азимут справа — найденный максимум corr."
+                  help="Параметр стенда. Итоговый азимут справа — найденный максимум совпадения."
                   onChange={(value) => updateConfig("trueAzimuthDeg", value)}
                 />
                 <Slider
@@ -1324,37 +1360,50 @@ export function App() {
             <h2>Состояние системы</h2>
             <ToggleRow label="H=1500" enabled />
             <ToggleRow label="РВ" enabled />
-            <ToggleRow label="ЦМР" enabled />
-            <ToggleRow label="АЛГОРИТМ" enabled />
+            <ToggleRow label="КАРТА ВЫСОТ" enabled />
+            <ToggleRow label="КОНТУР" enabled />
           </section>
         </aside>
 
         <section className="center-stage">
-          {result && currentPoint ? (
-            <>
-              <StatusStrip result={result} />
-              <FlightPreview3D
-                result={result}
-                replayState={replayState}
-                replaySpeedMultiplier={replaySpeedMultiplier}
-                isReplayPaused={isReplayPaused}
-                onReplayChange={handleReplayChange}
-                theme={theme}
-              />
-              <SatelliteMap result={result} currentPoint={currentPoint} />
-              <div className="bottom-grid">
-                <NmeaStream result={result} currentIndex={currentIndex} />
-                <TerrainProfile result={result} />
-              </div>
-            </>
+          {mode === "operator" ? (
+            result && currentPoint ? (
+              <>
+                <StatusStrip result={result} />
+                <FlightPreview3D
+                  result={result}
+                  replayState={replayState}
+                  replaySpeedMultiplier={replaySpeedMultiplier}
+                  isReplayPaused={isReplayPaused}
+                  onReplayChange={handleReplayChange}
+                  theme={theme}
+                />
+                <SatelliteMap result={result} currentPoint={currentPoint} />
+                <div className="bottom-grid">
+                  <NmeaStream result={result} currentIndex={currentIndex} />
+                  <TerrainProfile result={result} />
+                </div>
+              </>
+            ) : (
+              <NmeaAwaitingState rawText={rawNmeaText} error={nmeaError} />
+            )
           ) : (
-            <NmeaAwaitingState rawText={rawNmeaText} error={nmeaError} />
+            <MethodologyMode />
           )}
         </section>
 
         <aside className="right-rail">
           {result && currentPoint ? (
             <>
+              <SolutionPanel
+                result={result}
+                currentPoint={currentPoint}
+                currentDistanceM={currentDistanceM}
+                currentElapsedS={currentElapsedS}
+                currentAglM={currentAglM}
+              />
+              {currentAutopilotOutput ? <AlgorithmOutputPanel result={result} output={currentAutopilotOutput} /> : null}
+              <ValidationPanel result={result} />
               <AlgorithmEventLog result={result} />
               <CorrelationSurface result={result} />
               <section className="panel region-panel">
@@ -1371,22 +1420,13 @@ export function App() {
                   <span>река <b>{TAIGA_ROUTE.riverName}</b></span>
                 </div>
                 <div className="dem-provenance">
-                  <span>ЦМР</span>
+                  <span>Карта высот</span>
                   <b>{COPERNICUS_TAIGA_DEM.sourceName}</b>
                   <small>
                     {COPERNICUS_TAIGA_DEM.width}x{COPERNICUS_TAIGA_DEM.height} · {COPERNICUS_TAIGA_DEM.bounds.latMin.toFixed(2)}-{COPERNICUS_TAIGA_DEM.bounds.latMax.toFixed(2)} N · {COPERNICUS_TAIGA_DEM.bounds.lonMin.toFixed(2)}-{COPERNICUS_TAIGA_DEM.bounds.lonMax.toFixed(2)} E · {formatIsoDate(COPERNICUS_TAIGA_DEM.generatedAt)}
                   </small>
                 </div>
               </section>
-              <SolutionPanel
-                result={result}
-                currentPoint={currentPoint}
-                currentDistanceM={currentDistanceM}
-                currentElapsedS={currentElapsedS}
-                currentAglM={currentAglM}
-              />
-              <AlgorithmOutputPanel result={result} currentPoint={currentPoint} currentElapsedS={currentElapsedS} />
-              <ValidationPanel result={result} />
             </>
           ) : (
             <NoNavigationOutputPanel rawText={rawNmeaText} error={nmeaError} />
