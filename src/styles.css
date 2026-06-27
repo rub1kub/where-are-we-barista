@@ -215,7 +215,7 @@ button { color: inherit; cursor: pointer; }
   border-color: var(--glass-border-2);
 }
 
-.top-actions button span {
+.top-actions button .status-dot {
   width: 7px;
   height: 7px;
   margin-right: 7px;
@@ -224,7 +224,7 @@ button { color: inherit; cursor: pointer; }
   box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
 }
 
-[data-theme="light"] .top-actions button span {
+[data-theme="light"] .top-actions button .status-dot {
   box-shadow: 0 0 6px rgba(5, 150, 105, 0.5);
 }
 
@@ -235,7 +235,19 @@ button { color: inherit; cursor: pointer; }
   box-shadow: var(--accent-glow);
 }
 
-.mini-button { width: 34px; padding: 0; }
+.mini-button {
+  min-width: 96px;
+  gap: 7px;
+  padding: 0 12px;
+}
+
+.mini-button svg { flex: 0 0 auto; }
+
+.mini-button-caption {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
 
 /* ─── Settings popover ───────────────────────────────────────────────────── */
 .settings-popover {
@@ -341,6 +353,21 @@ button { color: inherit; cursor: pointer; }
   align-content: start;
   gap: 10px;
 }
+
+.right-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  position: sticky;
+  top: 76px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  padding-right: 3px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.right-rail > * { flex: 0 0 auto; }
 
 /* ─── Glass panel base ───────────────────────────────────────────────────── */
 .rail-panel,
@@ -1195,6 +1222,88 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 }
 
 .region-stats b { color: var(--text-2); font-weight: 600; }
+
+/* ─── Compact right rail ───────────────────────────────────────────────── */
+.right-rail .solution-card,
+.right-rail .panel {
+  padding: 10px;
+}
+
+.right-rail .solution-top strong {
+  margin-top: 3px;
+  font-size: 21px;
+}
+
+.right-rail .solution-top p {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.right-rail .coordinates {
+  gap: 1px;
+  margin: 9px 0;
+  padding: 9px 0;
+}
+
+.right-rail .coordinates b { font-size: 18px; }
+
+.right-rail .local-coordinates {
+  margin: -2px 0 9px;
+  padding: 8px;
+}
+
+.right-rail .local-coordinates div { margin-top: 5px; }
+.right-rail .local-coordinates b { font-size: 13px; }
+
+.right-rail .decision-grid { gap: 6px; }
+.right-rail .decision-grid div { padding: 8px; }
+.right-rail .decision-grid strong { margin-top: 3px; font-size: 14px; }
+
+.right-rail .confidence {
+  margin-top: 9px;
+  padding: 10px 12px 9px;
+}
+
+.right-rail .confidence strong { font-size: 34px; }
+
+.right-rail .confidence i { margin-top: 8px; }
+
+.right-rail .panel header { margin-bottom: 8px; }
+
+.right-rail .panel h3 {
+  font-size: 20px;
+  line-height: 1.05;
+}
+
+.right-rail .event-log div { padding: 5px 8px; }
+
+.right-rail .heatmap {
+  height: 132px;
+}
+
+.right-rail .region-panel p {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.right-rail .region-stats {
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.right-rail .region-stats span {
+  padding: 7px 9px;
+  font-size: 11px;
+}
+
+.right-rail .dem-provenance {
+  margin-top: 8px;
+  padding: 8px 9px;
+}
+
+.right-rail .dem-provenance small { line-height: 1.3; }
 
 /* ─── Methodology ────────────────────────────────────────────────────────── */
 .methodology { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

@@ -140,9 +140,12 @@ function MiniButton({
   active?: boolean;
   onClick: () => void;
 }) {
+  const caption = label.split(" ")[0];
+
   return (
     <button className={`mini-button${active ? " active" : ""}`} type="button" aria-label={label} onClick={onClick}>
       {icon}
+      <span className="mini-button-caption">{caption}</span>
     </button>
   );
 }
@@ -1231,15 +1234,6 @@ export function App() {
         <aside className="right-rail">
           {result && currentPoint ? (
             <>
-              <SolutionPanel
-                result={result}
-                currentPoint={currentPoint}
-                currentDistanceM={currentDistanceM}
-                currentElapsedS={currentElapsedS}
-                currentAglM={currentAglM}
-              />
-              <AlgorithmOutputPanel result={result} />
-              <ValidationPanel result={result} />
               <AlgorithmEventLog result={result} />
               <CorrelationSurface result={result} />
               <section className="panel region-panel">
@@ -1263,6 +1257,15 @@ export function App() {
                   </small>
                 </div>
               </section>
+              <SolutionPanel
+                result={result}
+                currentPoint={currentPoint}
+                currentDistanceM={currentDistanceM}
+                currentElapsedS={currentElapsedS}
+                currentAglM={currentAglM}
+              />
+              <AlgorithmOutputPanel result={result} />
+              <ValidationPanel result={result} />
             </>
           ) : (
             <NoNavigationOutputPanel rawText={rawNmeaText} error={nmeaError} />
