@@ -1184,6 +1184,7 @@ export function App() {
                   replaySpeedMultiplier={replaySpeedMultiplier}
                   isReplayPaused={isReplayPaused}
                   onReplayChange={handleReplayChange}
+                  theme={theme}
                 />
                 <SatelliteMap result={result} currentPoint={currentPoint} />
                 <div className="bottom-grid">

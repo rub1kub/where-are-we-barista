@@ -9,7 +9,30 @@ type FlightPreview3DProps = {
   replaySpeedMultiplier: number;
   isReplayPaused: boolean;
   onReplayChange: (state: FlightReplayState) => void;
+  theme: string;
 };
+
+function resolveTheme(theme: string): "light" | "dark" {
+  if (theme === "light") return "light";
+  if (theme === "dark") return "dark";
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function applyTheme3D(
+  isLight: boolean,
+  scene: THREE.Scene,
+  horizon: THREE.Mesh | null,
+  ambient: THREE.HemisphereLight | null,
+) {
+  const sky = isLight ? 0x87c5e8 : 0x071018;
+  scene.background = new THREE.Color(sky);
+  if (scene.fog instanceof THREE.FogExp2) scene.fog.color.set(sky);
+  if (horizon) (horizon.material as THREE.MeshBasicMaterial).color.set(isLight ? 0x87c5e8 : 0x10271c);
+  if (ambient) {
+    ambient.color.set(isLight ? 0xd4eeff : 0xc8f7e7);
+    ambient.groundColor.set(isLight ? 0x6b9e5c : 0x17231c);
+  }
+}
 
 export type FlightReplayState = {
   pointIndex: number;
@@ -451,9 +474,16 @@ export function FlightPreview3D({
   replaySpeedMultiplier,
   isReplayPaused,
   onReplayChange,
+  theme,
 }: FlightPreview3DProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const replayControlRef = useRef({ replaySpeedMultiplier, isReplayPaused });
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const horizonRef = useRef<THREE.Mesh | null>(null);
+  const ambientRef = useRef<THREE.HemisphereLight | null>(null);
+  const themeRef = useRef(theme);
+
+  useEffect(() => { themeRef.current = theme; }, [theme]);
 
   useEffect(() => {
     replayControlRef.current = { replaySpeedMultiplier, isReplayPaused };
@@ -474,17 +504,22 @@ export function FlightPreview3D({
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x071018);
     scene.fog = new THREE.FogExp2(0x071018, 0.055);
+    sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 120);
     camera.position.set(-6, 7.5, 10);
 
     const ambient = new THREE.HemisphereLight(0xc8f7e7, 0x17231c, 1.75);
+    ambientRef.current = ambient;
     scene.add(ambient);
     const sun = new THREE.DirectionalLight(0xf8fff4, 2.35);
     sun.position.set(-5, 9, 6);
     scene.add(sun);
 
-    scene.add(makeHorizonPlane());
+    const horizonMesh = makeHorizonPlane();
+    horizonRef.current = horizonMesh;
+    scene.add(horizonMesh);
+    applyTheme3D(resolveTheme(themeRef.current) === "light", scene, horizonMesh, ambient);
 
     let terrainTexture: THREE.Texture = makeTerrainTexture();
     let disposed = false;
@@ -627,6 +662,9 @@ export function FlightPreview3D({
       disposed = true;
       cancelAnimationFrame(raf);
       observer.disconnect();
+      sceneRef.current = null;
+      horizonRef.current = null;
+      ambientRef.current = null;
       scene.traverse((object) => {
         const mesh = object as THREE.Mesh;
         if (mesh.geometry) mesh.geometry.dispose();
@@ -638,6 +676,13 @@ export function FlightPreview3D({
       renderer.dispose();
     };
   }, [onReplayChange, result]);
+
+  useEffect(() => {
+    const isLight = resolveTheme(theme) === "light";
+    if (sceneRef.current) {
+      applyTheme3D(isLight, sceneRef.current, horizonRef.current, ambientRef.current);
+    }
+  }, [theme]);
 
   const primaryPath = result.truthAvailable && result.truthPath.length > 1 ? result.truthPath : result.estimatedPath;
   const fallbackPoint = primaryPath[0];
