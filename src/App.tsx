@@ -36,6 +36,7 @@ const TILE_SIZE = 256;
 const MAP_WIDTH = 980;
 const MAP_HEIGHT = 560;
 const PX4_DEMO_NMEA_URL = "/examples/px4-derived-radio-altimeter.nmea";
+const VANAVARA_CONTROL_NMEA_URL = "/examples/vanavara-success-radio-altimeter.nmea";
 const REPLAY_SPEED_OPTIONS = [30, 60, 120, 240] as const;
 
 function formatNumber(value: number, digits = 0): string {
@@ -213,6 +214,7 @@ function NmeaImportPanel({
   onFileChange,
   onAnalyze,
   onUseStandLog,
+  onUseControlLog,
   onUsePx4Log,
 }: {
   rawText: string;
@@ -222,6 +224,7 @@ function NmeaImportPanel({
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onAnalyze: () => void;
   onUseStandLog: () => void;
+  onUseControlLog: () => void;
   onUsePx4Log: () => void;
 }) {
   const lineCount = rawText.split(/\r?\n/).filter(Boolean).length;
@@ -256,6 +259,7 @@ function NmeaImportPanel({
           <input accept=".txt,.nmea,.log" type="file" onChange={onFileChange} />
         </label>
         <button type="button" onClick={onUseStandLog}>Журнал стенда</button>
+        <button type="button" onClick={onUseControlLog}>Контроль Ванавара</button>
         <button type="button" onClick={onUsePx4Log}>PX4 пример</button>
         <button className="primary" type="button" onClick={onAnalyze}>Рассчитать по журналу</button>
       </div>
@@ -923,6 +927,22 @@ export function App() {
     solveNmeaText(rawNmeaText);
   }
 
+  async function useControlLog() {
+    setInputMode("nmea");
+    setImportedResult(null);
+    setNmeaError(null);
+    try {
+      const response = await fetch(VANAVARA_CONTROL_NMEA_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      setRawNmeaText(text);
+      solveNmeaText(text);
+    } catch {
+      setImportedResult(null);
+      setNmeaError("Не удалось загрузить контрольный журнал Ванавары из examples.");
+    }
+  }
+
   async function usePx4Log() {
     setInputMode("nmea");
     setImportedResult(null);
@@ -1086,6 +1106,7 @@ export function App() {
                 onFileChange={loadNmeaFile}
                 onAnalyze={analyzeNmeaLog}
                 onUseStandLog={useStandLog}
+                onUseControlLog={useControlLog}
                 onUsePx4Log={usePx4Log}
               />
             )}

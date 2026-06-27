@@ -128,6 +128,29 @@ flowchart TB
 | Диапазон высот | `242.6-591.8 м` |
 | Генератор | `scripts/generate-dem-sample.mjs` |
 
+## Внешние NMEA-журналы
+
+В репозитории есть два файла для режима **Журнал NMEA**:
+
+| Файл | Назначение | Ожидаемый результат |
+| --- | --- | --- |
+| `examples/vanavara-success-radio-altimeter.nmea` | synthetic control log для текущего района Ванавары | `FIX VALID`, координаты, Vпут, азимут, confidence |
+| `examples/px4-derived-radio-altimeter.nmea` | внешний PX4-derived журнал, приведённый к формату кейса | чаще `NO FIX`, потому что профиль не соответствует текущей ЦМР |
+
+`vanavara-success-radio-altimeter.nmea` — это не данные заказчика. Это заранее сохранённый контрольный журнал, сгенерированный по текущему DEM-сэмплу, чтобы доказать post-flight режим: файл загружается извне, а solver получает только NMEA, ЦМР и настройки. Истинная траектория используется только для генерации и описания fixture, но не передаётся в `solveFromNmea`.
+
+CLI-проверка успешного внешнего файла:
+
+```bash
+npm run nmea:analyze -- examples/vanavara-success-radio-altimeter.nmea
+```
+
+CLI-проверка отрицательного внешнего файла:
+
+```bash
+npm run nmea:analyze -- examples/px4-derived-radio-altimeter.nmea
+```
+
 ## Соответствие ТЗ
 
 | Требование | Статус | Реализация |
@@ -145,6 +168,8 @@ flowchart TB
 | Тепловая карта corr | выполнено | `CorrelationSurface` |
 | Траектория на карте | выполнено | `SatelliteMap` |
 | Журнал NMEA | выполнено | `solveFromNmea`, режим `Журнал NMEA` |
+| Успешный внешний контрольный NMEA | выполнено | `examples/vanavara-success-radio-altimeter.nmea` |
+| Отрицательный внешний NMEA | выполнено | `examples/px4-derived-radio-altimeter.nmea` |
 | События алгоритма | выполнено | `AlgorithmEventLog`, `events` |
 | Самооценка точности | выполнено | `estimateConfidence`, `navigationStatus` |
 | Статусы `LOW RELIEF` / `NO FIX` | выполнено | `classifyNavigationStatus` |
@@ -217,6 +242,7 @@ http://127.0.0.1:5173/
 ```bash
 npm test
 npm run build
+npm run nmea:analyze -- examples/vanavara-success-radio-altimeter.nmea
 npm run nmea:analyze -- examples/px4-derived-radio-altimeter.nmea
 ```
 
@@ -245,6 +271,7 @@ Smoke-тесты проверяют:
 - построение heatmap/corr;
 - снижение доверия на плоском шумном рельефе;
 - работу solver-а без truth-траектории;
+- успешный внешний контрольный NMEA без truth-траектории;
 - импорт внешнего PX4-derived NMEA fixture;
 - события расчёта и структурированный выход для автопилота;
 - отказ `NO FIX` на заведомо несовместимом профиле.

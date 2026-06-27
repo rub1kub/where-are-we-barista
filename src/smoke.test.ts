@@ -100,6 +100,35 @@ function run() {
   assert(Number.isFinite(imported.autopilotOutput.localYM), "autopilot output should expose local Y coordinate");
   assert(Math.hypot(imported.autopilotOutput.localXM, imported.autopilotOutput.localYM) > 1000, "local X/Y should be in DEM meters");
 
+  const vanavaraControlNmea = readFileSync("examples/vanavara-success-radio-altimeter.nmea", "utf8");
+  const vanavaraControl = solveFromNmea(vanavaraControlNmea, {
+    terrainKind: DEFAULT_MATCHER_CONFIG.terrainKind,
+    baroAltitudeM: DEFAULT_MATCHER_CONFIG.baroAltitudeM,
+    sampleRateHz: DEFAULT_MATCHER_CONFIG.sampleRateHz,
+    speedMinMps: DEFAULT_MATCHER_CONFIG.speedMinMps,
+    speedMaxMps: DEFAULT_MATCHER_CONFIG.speedMaxMps,
+    speedStepMps: DEFAULT_MATCHER_CONFIG.speedStepMps,
+    plannedAzimuthDeg: DEFAULT_MATCHER_CONFIG.plannedAzimuthDeg,
+    courseLookaheadM: DEFAULT_MATCHER_CONFIG.courseLookaheadM,
+  });
+  const vanavaraWgs84 = localPointToWgs84(vanavaraControl.estimatedPath[vanavaraControl.estimatedPath.length - 1]);
+  assert(!vanavaraControl.truthAvailable, "Vanavara control NMEA must solve without truth");
+  assert(vanavaraControl.truthPath.length === 0, "Vanavara control NMEA must not carry truthPath");
+  assert(vanavaraControl.finalErrorM === null && vanavaraControl.speedErrorMps === null, "Vanavara control truth metrics must stay unavailable");
+  assert(
+    vanavaraControl.navigationStatus === "FIX VALID" || vanavaraControl.navigationStatus === "FIX DEGRADED",
+    "Vanavara external control NMEA should produce a usable fix",
+  );
+  assert(vanavaraControl.samples.length === 4801, "Vanavara control fixture should keep every imported sentence");
+  assert(vanavaraControl.nmeaQuality.checksumInvalid === 0, "Vanavara control fixture should pass checksum policy");
+  assert(vanavaraControl.best.correlation > 0.95, "Vanavara control fixture should produce a strong correlation peak");
+  assert(vanavaraControl.autopilotOutput.confidence > 0.7, "Vanavara control autopilot output should carry useful confidence");
+  assert(Math.abs(vanavaraControl.best.speedMps - DEFAULT_MATCHER_CONFIG.trueSpeedMps) <= 1, "Vanavara control should recover speed from file");
+  assert(angleError(vanavaraControl.best.azimuthDeg, DEFAULT_MATCHER_CONFIG.trueAzimuthDeg) <= 2, "Vanavara control should recover azimuth from file");
+  assert(Number.isFinite(vanavaraControl.autopilotOutput.localXM), "Vanavara control should expose local X");
+  assert(Number.isFinite(vanavaraControl.autopilotOutput.localYM), "Vanavara control should expose local Y");
+  assert(Number.isFinite(vanavaraWgs84.lat) && Number.isFinite(vanavaraWgs84.lon), "Vanavara control should expose WGS-84 coordinates");
+
   const px4ExternalNmea = readFileSync("examples/px4-derived-radio-altimeter.nmea", "utf8");
   const px4Imported = solveFromNmea(px4ExternalNmea, {
     terrainKind: DEFAULT_MATCHER_CONFIG.terrainKind,

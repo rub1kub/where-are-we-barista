@@ -83,7 +83,9 @@
       "uiMode": "Журнал NMEA",
       "input": "textarea или загрузка .txt/.nmea/.log",
       "solverBoundary": "режим внешнего журнала работает без truthPath, trueSpeed, trueAzimuth и сгенерированной истинной траектории",
-      "fixture": "examples/px4-derived-radio-altimeter.nmea"
+      "successControlFixture": "examples/vanavara-success-radio-altimeter.nmea",
+      "successControlMetadata": "examples/vanavara-success-radio-altimeter.meta.json",
+      "negativeFixture": "examples/px4-derived-radio-altimeter.nmea"
     }
   },
   "commands": {
@@ -91,7 +93,8 @@
     "dev": "npm run dev",
     "test": "npm test",
     "build": "npm run build",
-    "analyzeNmea": "npm run nmea:analyze -- examples/px4-derived-radio-altimeter.nmea",
+    "analyzeControlNmea": "npm run nmea:analyze -- examples/vanavara-success-radio-altimeter.nmea",
+    "analyzePx4Nmea": "npm run nmea:analyze -- examples/px4-derived-radio-altimeter.nmea",
     "regenerateDemSample": "npm run dem:generate"
   },
   "agentWorkflow": {
@@ -200,7 +203,7 @@
   },
   "knownRisks": [
     "DEM-сэмпл покрывает демонстрационный район, но не является полноценным тайловым DEM-движком для любого маршрута.",
-    "Нет заказного NMEA-журнала радиовысотомера; внешний режим проверяется на стендовом и PX4-derived NMEA без truth.",
+    "Нет заказного NMEA-журнала радиовысотомера; внешний успешный режим проверяется на synthetic control log по текущему DEM, а PX4-derived NMEA используется как negative NO FIX case.",
     "course_correction_deg является рекомендательным полем и не заменяет автопилотный контур управления.",
     "3D-превью показывает ход полёта по найденной траектории, но не является полноценным физическим авиасимулятором.",
     "Для бортового вычислителя потребуется профилирование и перенос тяжёлого перебора в WebWorker или WASM."

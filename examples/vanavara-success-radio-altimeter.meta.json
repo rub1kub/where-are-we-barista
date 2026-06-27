@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0",
+  "file": "vanavara-success-radio-altimeter.nmea",
+  "kind": "synthetic control log",
+  "purpose": "Successful external NMEA fixture for post-flight mode without passing truthPath into solver.",
+  "warning": "This is not customer data. Truth is used only to generate and document this fixture, not as solver input.",
+  "region": "Красноярский край, средняя тайга",
+  "routeName": "Ванавара → геологоразведочный лагерь",
+  "dem": {
+    "sourceName": "Copernicus DEM GLO-30 COG",
+    "region": "Красноярский край, район Ванавары и Подкаменной Тунгуски",
+    "generatedAt": "2026-06-26T13:50:24.464Z",
+    "bounds": {
+      "latMin": 60.25,
+      "latMax": 60.95,
+      "lonMin": 102.15,
+      "lonMax": 105.65
+    },
+    "width": 420,
+    "height": 180,
+    "minElevationM": 242.6,
+    "maxElevationM": 591.8
+  },
+  "nmea": {
+    "sentence": "GPGGA",
+    "sampleRateHz": 2,
+    "samples": 4801,
+    "baroAltitudeM": 1500,
+    "radioAltitudeField": "GGA altitude field is used as RA AGL for the hackathon case format.",
+    "checksum": "valid XOR checksum on every sentence"
+  },
+  "generation": {
+    "terrainKind": "taiga",
+    "durationS": 2400,
+    "speedMps": 44,
+    "azimuthDeg": 73,
+    "radioNoiseM": 3,
+    "expectedRouteLengthM": 105600,
+    "startWgs84": {
+      "lat": 60.3446,
+      "lon": 102.2797
+    },
+    "finalWgs84": {
+      "lat": 60.621949,
+      "lon": 104.113166
+    }
+  },
+  "expectedSolverResult": {
+    "navigationStatus": "FIX VALID or FIX DEGRADED",
+    "approximateSpeedMps": 44,
+    "approximateAzimuthDeg": 73,
+    "truthAvailableInSolver": false
+  }
+}
