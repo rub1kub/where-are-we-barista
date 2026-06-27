@@ -20,7 +20,7 @@ function matchString(source, pattern, name) {
 }
 
 const source = await readFile(sourcePath, "utf8");
-const elevationBlock = source.match(/elevationM:\s*\[([\s\S]*?)\n\s*\],\n};/);
+const elevationBlock = source.match(/elevationM:\s*\[([\s\S]*?)\r?\n\s*\],\r?\n};/);
 if (!elevationBlock) throw new Error("Cannot read elevationM array");
 
 const heights = elevationBlock[1].match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];

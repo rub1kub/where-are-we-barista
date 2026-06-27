@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,6 +30,27 @@ function parseSimpleCsv(text) {
     const values = line.split(",");
     return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
   });
+}
+
+async function fileExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+if (!(await fileExists(sourceCsv))) {
+  if (await fileExists(outputNmea)) {
+    const existing = await readFile(outputNmea, "utf8");
+    const sentenceCount = existing.split(/\r?\n/).filter(Boolean).length;
+    console.warn(`Source CSV is not available: ${sourceCsv}`);
+    console.warn(`Keeping committed NMEA fixture: ${outputNmea} (${sentenceCount} NMEA sentences)`);
+    process.exit(0);
+  }
+
+  throw new Error(`Source CSV is not available: ${sourceCsv}`);
 }
 
 const csv = await readFile(sourceCsv, "utf8");
