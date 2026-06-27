@@ -7,6 +7,7 @@ import {
   Gauge,
   MapPinned,
   Pause,
+  Play,
   RotateCcw,
   Satellite,
   Settings,
@@ -35,6 +36,7 @@ const TILE_SIZE = 256;
 const MAP_WIDTH = 980;
 const MAP_HEIGHT = 560;
 const PX4_DEMO_NMEA_URL = "/examples/px4-derived-radio-altimeter.nmea";
+const REPLAY_SPEED_OPTIONS = [30, 60, 120, 240] as const;
 
 function formatNumber(value: number, digits = 0): string {
   return value.toLocaleString("ru-RU", {
@@ -97,9 +99,19 @@ function Help({ text }: { text: string }) {
   );
 }
 
-function MiniButton({ icon, label }: { icon: ReactNode; label: string }) {
+function MiniButton({
+  icon,
+  label,
+  active = false,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
   return (
-    <button className="mini-button" type="button" aria-label={label}>
+    <button className={`mini-button${active ? " active" : ""}`} type="button" aria-label={label} onClick={onClick}>
       {icon}
     </button>
   );
@@ -809,6 +821,9 @@ export function App() {
   const [importedResult, setImportedResult] = useState<TerrainMatchResult | null>(null);
   const [nmeaError, setNmeaError] = useState<string | null>(null);
   const [replayState, setReplayState] = useState<FlightReplayState | null>(null);
+  const [isReplayPaused, setReplayPaused] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [replaySpeedMultiplier, setReplaySpeedMultiplier] = useState(120);
   const simulationResult = useMemo(() => runTerrainMatching(config), [config]);
   const result = inputMode === "nmea" ? importedResult : simulationResult;
   const routeKm = result ? routeLengthM(result.truthAvailable ? result.truthPath : result.estimatedPath) / 1000 : 0;
@@ -938,8 +953,47 @@ export function App() {
         <div className="top-actions">
           <button className={mode === "operator" ? "active" : ""} type="button" onClick={() => setMode("operator")}>Оператор</button>
           <button className={mode === "method" ? "active" : ""} type="button" onClick={() => setMode("method")}>Методика</button>
-          <MiniButton icon={<Pause size={17} />} label="Пауза" />
-          <MiniButton icon={<Settings size={17} />} label="Настройки" />
+          <MiniButton
+            icon={isReplayPaused ? <Play size={17} /> : <Pause size={17} />}
+            label={isReplayPaused ? "Продолжить прокрутку" : "Пауза"}
+            active={isReplayPaused}
+            onClick={() => setReplayPaused((value) => !value)}
+          />
+          <MiniButton
+            icon={<Settings size={17} />}
+            label="Настройки симуляции"
+            active={settingsOpen}
+            onClick={() => setSettingsOpen((value) => !value)}
+          />
+          {settingsOpen ? (
+            <div className="settings-popover" role="dialog" aria-label="Настройки симуляции">
+              <div className="settings-popover-head">
+                <span>Скорость прокрутки</span>
+                <strong>x{replaySpeedMultiplier}</strong>
+              </div>
+              <input
+                aria-label="Скорость прокрутки"
+                type="range"
+                min={10}
+                max={240}
+                step={10}
+                value={replaySpeedMultiplier}
+                onChange={(event) => setReplaySpeedMultiplier(Number(event.currentTarget.value))}
+              />
+              <div className="speed-buttons" role="group" aria-label="Быстрый выбор скорости">
+                {REPLAY_SPEED_OPTIONS.map((speed) => (
+                  <button
+                    key={speed}
+                    className={replaySpeedMultiplier === speed ? "active" : ""}
+                    type="button"
+                    onClick={() => setReplaySpeedMultiplier(speed)}
+                  >
+                    x{speed}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -1052,7 +1106,13 @@ export function App() {
             result && currentPoint ? (
               <>
                 <StatusStrip result={result} />
-                <FlightPreview3D result={result} replayState={replayState} onReplayChange={handleReplayChange} />
+                <FlightPreview3D
+                  result={result}
+                  replayState={replayState}
+                  replaySpeedMultiplier={replaySpeedMultiplier}
+                  isReplayPaused={isReplayPaused}
+                  onReplayChange={handleReplayChange}
+                />
                 <SatelliteMap result={result} currentPoint={currentPoint} />
                 <div className="bottom-grid">
                   <NmeaStream result={result} currentIndex={currentIndex} />

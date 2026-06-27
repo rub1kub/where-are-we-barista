@@ -6,6 +6,8 @@ import { MatchPoint, TerrainMatchResult, localPointToWgs84, routeLengthM } from 
 type FlightPreview3DProps = {
   result: TerrainMatchResult;
   replayState: FlightReplayState | null;
+  replaySpeedMultiplier: number;
+  isReplayPaused: boolean;
   onReplayChange: (state: FlightReplayState) => void;
 };
 
@@ -24,7 +26,6 @@ const TEXTURE_WIDTH = 1024;
 const TEXTURE_HEIGHT = 512;
 const SATELLITE_TILE_SIZE = 256;
 const SATELLITE_ZOOM = 9;
-const REPLAY_SPEED_MULTIPLIER = 120;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -402,40 +403,61 @@ function makeDrone() {
   group.add(fuselage);
 
   const nose = new THREE.Mesh(new THREE.ConeGeometry(0.092, 0.18, 24), accentMaterial);
-  nose.rotation.x = -Math.PI / 2;
-  nose.position.z = -0.52;
+  nose.rotation.x = Math.PI / 2;
+  nose.position.z = 0.52;
   group.add(nose);
 
   const wing = new THREE.Mesh(makeWingGeometry(1.45, 0.22, 0.11), wingMaterial);
-  wing.position.z = -0.03;
+  wing.position.z = 0.03;
   wing.rotation.x = -0.035;
   group.add(wing);
 
   const tailWing = new THREE.Mesh(makeWingGeometry(0.52, 0.12, 0.07), wingMaterial);
-  tailWing.position.z = 0.47;
+  tailWing.position.z = -0.47;
   tailWing.position.y = 0.025;
   group.add(tailWing);
 
-  const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.13, 24), darkMaterial);
+  const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.076, 0.16, 24), darkMaterial);
   engine.rotation.x = Math.PI / 2;
-  engine.position.z = 0.62;
+  engine.position.z = 0.64;
   group.add(engine);
 
+  const propShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.023, 0.15, 16), darkMaterial);
+  propShaft.rotation.x = Math.PI / 2;
+  propShaft.position.z = 0.76;
+  group.add(propShaft);
+
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.28, 0.12), accentMaterial);
-  fin.position.z = 0.42;
+  fin.position.z = -0.42;
   fin.position.y = 0.16;
   group.add(fin);
 
-  const prop = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.42, 0.018), darkMaterial);
-  prop.position.z = 0.73;
+  const prop = new THREE.Group();
+  const propBladeA = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.52, 0.014), darkMaterial);
+  const propBladeB = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.52, 0.014), darkMaterial);
+  propBladeB.rotation.z = Math.PI / 2;
+  const propHub = new THREE.Mesh(new THREE.SphereGeometry(0.055, 18, 12), darkMaterial);
+  prop.add(propBladeA, propBladeB, propHub);
+  prop.position.z = 0.86;
   group.add(prop);
 
   group.scale.setScalar(0.52);
   return { group, prop };
 }
 
-export function FlightPreview3D({ result, replayState, onReplayChange }: FlightPreview3DProps) {
+export function FlightPreview3D({
+  result,
+  replayState,
+  replaySpeedMultiplier,
+  isReplayPaused,
+  onReplayChange,
+}: FlightPreview3DProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const replayControlRef = useRef({ replaySpeedMultiplier, isReplayPaused });
+
+  useEffect(() => {
+    replayControlRef.current = { replaySpeedMultiplier, isReplayPaused };
+  }, [isReplayPaused, replaySpeedMultiplier]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -526,15 +548,24 @@ export function FlightPreview3D({ result, replayState, onReplayChange }: FlightP
     observer.observe(canvas);
     resize();
 
-    const startedAtMs = performance.now();
+    let lastFrameMs = performance.now();
+    let replayElapsedS = 0;
+    let visualElapsedS = 0;
     let raf = 0;
     const orientationProbe = new THREE.Object3D();
     let orientationInitialized = false;
     let lastReplayEmitS = -1;
 
     const animate = () => {
-      const elapsed = (performance.now() - startedAtMs) / 1000;
-      const t = ((elapsed * REPLAY_SPEED_MULTIPLIER) % replayRealDurationS) / replayRealDurationS;
+      const now = performance.now();
+      const deltaS = Math.min(0.08, (now - lastFrameMs) / 1000);
+      lastFrameMs = now;
+      const controls = replayControlRef.current;
+      if (!controls.isReplayPaused) {
+        replayElapsedS = (replayElapsedS + deltaS * controls.replaySpeedMultiplier) % replayRealDurationS;
+        visualElapsedS += deltaS;
+      }
+      const t = replayElapsedS / replayRealDurationS;
       const pointIndex = Math.min(primaryPath.length - 1, Math.max(0, Math.round(t * (primaryPath.length - 1))));
       const baseGround = routePosition(replayCurve, t);
       const aheadGround = routePosition(replayCurve, Math.min(0.999, t + 0.006));
@@ -549,14 +580,13 @@ export function FlightPreview3D({ result, replayState, onReplayChange }: FlightP
         tangent.x * futureTangent.x + tangent.z * futureTangent.z,
       );
       const bank = clamp(-signedTurn * 4.8, -0.34, 0.34);
-      const turbulenceY = Math.sin(elapsed * 0.63) * 0.012 + Math.sin(elapsed * 1.17) * 0.006;
+      const turbulenceY = Math.sin(visualElapsedS * 0.63) * 0.012 + Math.sin(visualElapsedS * 1.17) * 0.006;
       const base = new THREE.Vector3(baseGround.x, cruiseY + turbulenceY, baseGround.z);
       const ahead = new THREE.Vector3(aheadGround.x, cruiseY, aheadGround.z);
 
       drone.position.copy(base);
       orientationProbe.position.copy(base);
       orientationProbe.lookAt(ahead);
-      orientationProbe.rotateY(Math.PI);
       orientationProbe.rotateZ(bank);
       if (!orientationInitialized) {
         drone.quaternion.copy(orientationProbe.quaternion);
@@ -564,8 +594,10 @@ export function FlightPreview3D({ result, replayState, onReplayChange }: FlightP
       } else {
         drone.quaternion.slerp(orientationProbe.quaternion, 0.14);
       }
-      prop.rotation.z += 1.28;
-      if (elapsed - lastReplayEmitS > 0.24 || t < 0.01) {
+      if (!controls.isReplayPaused) {
+        prop.rotation.z += deltaS * 86;
+      }
+      if (!controls.isReplayPaused && (visualElapsedS - lastReplayEmitS > 0.24 || t < 0.01)) {
         const sample = result.samples[pointIndex];
         const pathPoint = primaryPath[pointIndex];
         onReplayChange({
@@ -574,7 +606,7 @@ export function FlightPreview3D({ result, replayState, onReplayChange }: FlightP
           progress: t,
           aglM: sample ? sample.radioAltitudeM : result.config.baroAltitudeM - (pathPoint?.elevationM ?? 0),
         });
-        lastReplayEmitS = elapsed;
+        lastReplayEmitS = visualElapsedS;
       }
 
       const side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
@@ -629,7 +661,7 @@ export function FlightPreview3D({ result, replayState, onReplayChange }: FlightP
           <span>Vпут {result.best.speedMps.toFixed(1)} м/с</span>
           <span>Источник {result.truthAvailable ? "стенд" : "NMEA"}</span>
           <span>T+ {Math.round(replayState?.elapsedS ?? 0)} с</span>
-          <span>Прокрутка x{REPLAY_SPEED_MULTIPLIER} · {replayDurationMin} мин</span>
+          <span>{isReplayPaused ? "Пауза" : `Прокрутка x${replaySpeedMultiplier}`} · {replayDurationMin} мин</span>
         </div>
       </div>
     </section>
