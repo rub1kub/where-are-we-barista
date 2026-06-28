@@ -887,6 +887,36 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .nmea-import-state b { color: var(--text); font-weight: 600; }
 
+.checkpoint-run-note {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--glass-border-dim);
+  background: var(--glass-inset);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.checkpoint-run-note.ok {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.checkpoint-run-note.pending {
+  border-color: rgba(245, 158, 11, 0.24);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.checkpoint-run-note.bad {
+  border-color: rgba(248, 113, 113, 0.25);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
 /* ─── Alerts ─────────────────────────────────────────────────────────────── */
 .input-error {
   margin: 0;
@@ -1068,7 +1098,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 /* ─── Status strip ───────────────────────────────────────────────────────── */
 .status-strip {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
   gap: 8px;
 }
 

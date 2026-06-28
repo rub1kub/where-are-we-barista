@@ -145,6 +145,12 @@ function formatIsoDate(value: string): string {
   return date.toLocaleDateString("ru-RU");
 }
 
+function formatIsoTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 function formatDuration(seconds: number): string {
   const safeSeconds = Math.max(0, Math.round(seconds));
   const minutes = Math.floor(safeSeconds / 60);
@@ -507,6 +513,18 @@ function CheckpointImportPanel({
   onExportCsv: () => void;
 }) {
   const lineCount = rawText.split(/\r?\n/).filter((row) => row.trim()).length;
+  const resultTone = error ? "bad" : result ? "ok" : rawText.trim() ? "pending" : "idle";
+  const resultMessage = error
+    ? error
+    : result
+      ? `Готово: ${formatNumber(result.inputSamples, 0)} точек, ${formatMeters(result.routeLengthM)}, СКО ${
+          result.profileRmseM === null ? "н/д" : formatMeters(result.profileRmseM)
+        }, corr ${result.profileCorrelation === null ? "н/д" : result.profileCorrelation.toFixed(3)}, доверие ${
+          result.confidence
+        }%, расчёт ${formatNumber(result.computeMs, 1)} мс · ${formatIsoTime(result.computedAt)}`
+      : rawText.trim()
+        ? "TXT загружен. Нажмите «Рассчитать траекторию», чтобы построить линию и координаты."
+        : "Загрузите TXT или нажмите «Пример TXT», затем запустите расчёт.";
 
   return (
     <div className="checkpoint-import">
@@ -545,9 +563,10 @@ function CheckpointImportPanel({
           <input accept=".tif,.tiff,.geotiff" type="file" onChange={onGeoTiffChange} disabled={isLoadingDem} />
         </label>
         <button type="button" onClick={onUseDemo}>Пример TXT</button>
-        <button className="primary" type="button" onClick={onAnalyze}>Рассчитать траекторию</button>
+        <button className="primary" type="button" onClick={onAnalyze}>{result ? "Пересчитать траекторию" : "Рассчитать траекторию"}</button>
         <button type="button" disabled={!result} onClick={onExportCsv}>CSV</button>
       </div>
+      <p className={`checkpoint-run-note ${resultTone}`}>{resultMessage}</p>
       <div className="nmea-import-state">
         <span>строк <b>{lineCount}</b></span>
         <span>шаг <b>{formatNumber(form.speedMps / Math.max(0.001, form.sampleRateHz), 1)} м</b></span>
@@ -1016,6 +1035,18 @@ function CheckpointStatusStrip({ result }: { result: CheckpointTrajectoryResult 
       <div>
         <span>Ошибка профиля</span>
         <strong>{result.profileRmseM === null ? "н/д" : formatMeters(result.profileRmseM)}</strong>
+      </div>
+      <div>
+        <span>Совпадение</span>
+        <strong>{result.profileCorrelation === null ? "н/д" : result.profileCorrelation.toFixed(3)}</strong>
+      </div>
+      <div>
+        <span>Доверие</span>
+        <strong>{result.confidence}%</strong>
+      </div>
+      <div>
+        <span>Расчёт</span>
+        <strong>{formatNumber(result.computeMs, 1)} мс</strong>
       </div>
     </section>
   );
@@ -1604,8 +1635,40 @@ function CheckpointOutputPanel({ result }: { result: CheckpointTrajectoryResult 
           <b>{result.profileRmseM === null ? "н/д" : formatMeters(result.profileRmseM)}</b>
         </div>
         <div>
+          <span>Средняя ошибка</span>
+          <b>{result.profileMaeM === null ? "н/д" : formatMeters(result.profileMaeM)}</b>
+        </div>
+        <div>
+          <span>Макс. ошибка</span>
+          <b>{result.profileMaxErrorM === null ? "н/д" : formatMeters(result.profileMaxErrorM)}</b>
+        </div>
+        <div>
+          <span>Совпадение профилей</span>
+          <b>{result.profileCorrelation === null ? "н/д" : result.profileCorrelation.toFixed(3)}</b>
+        </div>
+        <div>
+          <span>Доверие</span>
+          <b>{result.confidence}%</b>
+        </div>
+        <div>
+          <span>Время расчёта</span>
+          <b>{formatNumber(result.computeMs, 1)} мс</b>
+        </div>
+        <div>
           <span>Покрытие ЦМР</span>
           <b>{formatNumber(result.coverageRatio * 100, 0)}%</b>
+        </div>
+        <div className="wide">
+          <span>Расчёт высоты</span>
+          <b>H рельефа = {formatNumber(result.baroAltitudeM, 0)} м − радиовысота TXT</b>
+        </div>
+        <div className="wide">
+          <span>Расчёт шага</span>
+          <b>шаг = скорость / частота = {formatNumber(result.speedMps, 1)} / {formatNumber(result.sampleRateHz, 1)} = {formatNumber(result.sampleDistanceM, 1)} м</b>
+        </div>
+        <div className="wide">
+          <span>Статус</span>
+          <b>{result.statusReason}</b>
         </div>
         <div className="wide">
           <span>Карта</span>
@@ -1949,25 +2012,8 @@ export function App() {
     setCheckpointDem(dem);
     setCheckpointForm(nextForm);
     setRawCheckpointHeights(text);
-    try {
-      setCheckpointResult(buildCheckpointTrajectory({
-        heightsM: parseCheckpointHeights(text),
-        dem,
-        startX: nextForm.startX,
-        startY: nextForm.startY,
-        azimuthDeg: nextForm.azimuthDeg,
-        speedMps: nextForm.speedMps,
-        sampleRateHz: nextForm.sampleRateHz,
-        sampleDistanceM: nextForm.speedMps / Math.max(0.001, nextForm.sampleRateHz),
-        autoFitStep: nextForm.autoFitStep,
-        stepMinM: nextForm.stepMinM,
-        stepMaxM: nextForm.stepMaxM,
-      }));
-      setCheckpointError(null);
-    } catch (error) {
-      setCheckpointResult(null);
-      setCheckpointError(error instanceof Error ? error.message : "Не удалось подготовить пример TXT.");
-    }
+    setCheckpointResult(null);
+    setCheckpointError(null);
   }
 
   function exportCheckpointCsv() {

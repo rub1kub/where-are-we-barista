@@ -48,12 +48,17 @@ export type CheckpointTrajectoryResult = {
   startY: number;
   points: CheckpointTrajectoryPoint[];
   profileRmseM: number | null;
+  profileMaeM: number | null;
+  profileMaxErrorM: number | null;
+  profileCorrelation: number | null;
   coverageRatio: number;
+  confidence: number;
   status: "TRAJECTORY READY" | "PROFILE MISMATCH" | "DEM UNAVAILABLE";
   statusReason: string;
   demName: string;
   crsLabel: string;
   computedAt: string;
+  computeMs: number;
 };
 
 export type BuildCheckpointTrajectoryInput = {
@@ -71,6 +76,10 @@ export type BuildCheckpointTrajectoryInput = {
   stepMaxM?: number;
   stepResolutionM?: number;
 };
+
+function nowMs(): number {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
 
 function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
@@ -153,6 +162,50 @@ function rmse(values: Array<number | null>): number | null {
   return Math.sqrt(finite.reduce((sum, value) => sum + value * value, 0) / finite.length);
 }
 
+function mae(values: Array<number | null>): number | null {
+  const finite = values.filter((value): value is number => Number.isFinite(value));
+  if (finite.length === 0) return null;
+  return finite.reduce((sum, value) => sum + Math.abs(value), 0) / finite.length;
+}
+
+function maxAbs(values: Array<number | null>): number | null {
+  const finite = values.filter((value): value is number => Number.isFinite(value));
+  if (finite.length === 0) return null;
+  return finite.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
+}
+
+function profileCorrelation(points: CheckpointTrajectoryPoint[]): number | null {
+  const pairs = points
+    .filter((point) => point.demHeightM !== null)
+    .map((point) => [point.terrainMslM, point.demHeightM as number] as const);
+  if (pairs.length < 3) return null;
+
+  const measuredMean = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+  const demMean = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+  let numerator = 0;
+  let measuredVariance = 0;
+  let demVariance = 0;
+
+  pairs.forEach(([measured, dem]) => {
+    const measuredDelta = measured - measuredMean;
+    const demDelta = dem - demMean;
+    numerator += measuredDelta * demDelta;
+    measuredVariance += measuredDelta * measuredDelta;
+    demVariance += demDelta * demDelta;
+  });
+
+  const denominator = Math.sqrt(measuredVariance * demVariance);
+  if (denominator <= 1e-9) return null;
+  return clamp(numerator / denominator, -1, 1);
+}
+
+function checkpointConfidence(profileRmseM: number | null, correlation: number | null, coverageRatio: number): number {
+  const rmseScore = profileRmseM === null ? 0 : clamp(1 - profileRmseM / 80, 0, 1);
+  const correlationScore = correlation === null ? 0 : clamp((correlation - 0.45) / 0.55, 0, 1);
+  const coverageScore = clamp(coverageRatio, 0, 1);
+  return Math.round((rmseScore * 0.45 + correlationScore * 0.35 + coverageScore * 0.2) * 100);
+}
+
 function buildPoints(
   heightsM: number[],
   dem: CheckpointDem | null,
@@ -220,6 +273,7 @@ function fitSampleDistanceM(input: BuildCheckpointTrajectoryInput): number {
 }
 
 export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput): CheckpointTrajectoryResult {
+  const startedAt = nowMs();
   const baroAltitudeM = input.baroAltitudeM ?? DEFAULT_MATCHER_CONFIG.baroAltitudeM;
   const sampleRateHz = input.sampleRateHz ?? DEFAULT_MATCHER_CONFIG.sampleRateHz;
   const sampleDistanceM = fitSampleDistanceM(input);
@@ -234,7 +288,11 @@ export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput)
     baroAltitudeM,
   );
   const profileRmseM = rmse(points.map((point) => point.residualM));
+  const profileMaeM = mae(points.map((point) => point.residualM));
+  const profileMaxErrorM = maxAbs(points.map((point) => point.residualM));
+  const correlation = profileCorrelation(points);
   const coverageRatio = points.filter((point) => point.demHeightM !== null).length / points.length;
+  const confidence = checkpointConfidence(profileRmseM, correlation, coverageRatio);
   const routeLengthM = Math.max(0, points.length - 1) * sampleDistanceM;
 
   let status: CheckpointTrajectoryResult["status"] = "TRAJECTORY READY";
@@ -242,7 +300,7 @@ export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput)
   if (!input.dem || !input.dem.bbox) {
     status = "DEM UNAVAILABLE";
     statusReason = "GeoTIFF не загружен или без геопривязки: координаты построены, профиль с картой не сверен.";
-  } else if (coverageRatio < 0.65 || (profileRmseM !== null && profileRmseM > 120)) {
+  } else if (coverageRatio < 0.65 || (profileRmseM !== null && profileRmseM > 120) || confidence < 50) {
     status = "PROFILE MISMATCH";
     statusReason = "Профиль плохо совпадает с картой: проверьте старт X/Y, азимут, шаг или GeoTIFF.";
   }
@@ -259,12 +317,17 @@ export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput)
     startY: input.startY,
     points,
     profileRmseM,
+    profileMaeM,
+    profileMaxErrorM,
+    profileCorrelation: correlation,
     coverageRatio,
+    confidence,
     status,
     statusReason,
     demName: input.dem?.name ?? "GeoTIFF не загружен",
     crsLabel: input.dem?.crsLabel ?? "нет карты",
     computedAt: new Date().toISOString(),
+    computeMs: Math.max(0, nowMs() - startedAt),
   };
 }
 
