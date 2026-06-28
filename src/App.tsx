@@ -56,6 +56,7 @@ type ThemeMode = "light" | "dark" | "system";
 type CheckpointForm = {
   startX: number;
   startY: number;
+  startAsPixels: boolean;
   azimuthDeg: number;
   speedMps: number;
   sampleRateHz: number;
@@ -72,6 +73,7 @@ const CONTOUR_GRID_COLS = 184;
 const CONTOUR_GRID_ROWS = 106;
 const PX4_DEMO_NMEA_URL = "/examples/px4-derived-radio-altimeter.nmea";
 const CONTROL_NMEA_URL = "/examples/vanavara-success-radio-altimeter.nmea";
+const CHECKPOINT_ROUTE_1_URL = "/examples/route_1.txt";
 const REPLAY_SPEED_OPTIONS = [30, 60, 120, 240] as const;
 
 const SCENARIO_CONFIGS: Record<Exclude<ScenarioId, "bad-log">, Config> = {
@@ -496,6 +498,7 @@ function CheckpointImportPanel({
   onFormChange,
   onAnalyze,
   onUseDemo,
+  onUseTask1,
   onExportCsv,
 }: {
   rawText: string;
@@ -510,6 +513,7 @@ function CheckpointImportPanel({
   onFormChange: (patch: Partial<CheckpointForm>) => void;
   onAnalyze: () => void;
   onUseDemo: () => void;
+  onUseTask1: () => void;
   onExportCsv: () => void;
 }) {
   const lineCount = rawText.split(/\r?\n/).filter((row) => row.trim()).length;
@@ -553,6 +557,14 @@ function CheckpointImportPanel({
         />
         <span>Автоподбор шага по GeoTIFF</span>
       </label>
+      <label className="checkpoint-check">
+        <input
+          type="checkbox"
+          checked={form.startAsPixels}
+          onChange={(event) => onFormChange({ startAsPixels: event.currentTarget.checked })}
+        />
+        <span>Старт X/Y — пиксели GeoTIFF</span>
+      </label>
       <div className="nmea-import-actions">
         <label className="file-button">
           TXT
@@ -563,6 +575,7 @@ function CheckpointImportPanel({
           <input accept=".tif,.tiff,.geotiff" type="file" onChange={onGeoTiffChange} disabled={isLoadingDem} />
         </label>
         <button type="button" onClick={onUseDemo}>Пример TXT</button>
+        <button type="button" onClick={onUseTask1}>Задание 1</button>
         <button className="primary" type="button" onClick={onAnalyze}>{result ? "Пересчитать траекторию" : "Рассчитать траекторию"}</button>
         <button type="button" disabled={!result} onClick={onExportCsv}>CSV</button>
       </div>
@@ -570,6 +583,7 @@ function CheckpointImportPanel({
       <div className="nmea-import-state">
         <span>строк <b>{lineCount}</b></span>
         <span>шаг <b>{formatNumber(form.speedMps / Math.max(0.001, form.sampleRateHz), 1)} м</b></span>
+        <span>старт <b>{form.startAsPixels ? "пиксели" : "метры"}</b></span>
         <span>карта <b>{dem ? `${dem.width}x${dem.height}` : "нет"}</b></span>
         <span>СК <b>{dem?.crsLabel ?? "нет"}</b></span>
       </div>
@@ -1623,6 +1637,18 @@ function CheckpointOutputPanel({ result }: { result: CheckpointTrajectoryResult 
           <b>{formatNumber(final.y, 0)} м</b>
         </div>
         <div>
+          <span>Введённый старт</span>
+          <b>
+            {result.startCoordinateMode === "pixel"
+              ? `px ${formatNumber(result.inputStartX, 0)} / ${formatNumber(result.inputStartY, 0)}`
+              : `X ${formatNumber(result.inputStartX, 0)} / Y ${formatNumber(result.inputStartY, 0)}`}
+          </b>
+        </div>
+        <div>
+          <span>Старт локально</span>
+          <b>X {formatNumber(result.startX, 0)} / Y {formatNumber(result.startY, 0)}</b>
+        </div>
+        <div>
           <span>Широта</span>
           <b>{final.lat === null ? "н/д" : formatCoord(final.lat, "lat")}</b>
         </div>
@@ -1669,6 +1695,10 @@ function CheckpointOutputPanel({ result }: { result: CheckpointTrajectoryResult 
         <div className="wide">
           <span>Статус</span>
           <b>{result.statusReason}</b>
+        </div>
+        <div className="wide">
+          <span>Перевод старта</span>
+          <b>{result.startConversionNote}</b>
         </div>
         <div className="wide">
           <span>Карта</span>
@@ -1788,6 +1818,7 @@ export function App() {
     azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
     speedMps: DEFAULT_MATCHER_CONFIG.trueSpeedMps,
     sampleRateHz: DEFAULT_MATCHER_CONFIG.sampleRateHz,
+    startAsPixels: true,
     autoFitStep: true,
     stepMinM: 5,
     stepMaxM: 90,
@@ -1868,6 +1899,7 @@ export function App() {
       azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
       speedMps: DEFAULT_MATCHER_CONFIG.trueSpeedMps,
       sampleRateHz: DEFAULT_MATCHER_CONFIG.sampleRateHz,
+      startAsPixels: true,
       autoFitStep: true,
       stepMinM: 5,
       stepMaxM: 90,
@@ -1979,6 +2011,7 @@ export function App() {
         dem: checkpointDem,
         startX: checkpointForm.startX,
         startY: checkpointForm.startY,
+        startCoordinateMode: checkpointForm.startAsPixels ? "pixel" : "local",
         azimuthDeg: checkpointForm.azimuthDeg,
         speedMps: checkpointForm.speedMps,
         sampleRateHz: checkpointForm.sampleRateHz,
@@ -2003,6 +2036,7 @@ export function App() {
       azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
       speedMps: DEFAULT_MATCHER_CONFIG.trueSpeedMps,
       sampleRateHz: DEFAULT_MATCHER_CONFIG.sampleRateHz,
+      startAsPixels: false,
       autoFitStep: true,
       stepMinM: 5,
       stepMaxM: 90,
@@ -2014,6 +2048,58 @@ export function App() {
     setRawCheckpointHeights(text);
     setCheckpointResult(null);
     setCheckpointError(null);
+  }
+
+  function applyRoute1Checkpoint(text: string) {
+    const nextForm: CheckpointForm = {
+      startX: 2396,
+      startY: 1000,
+      startAsPixels: true,
+      azimuthDeg: 294,
+      speedMps: 15,
+      sampleRateHz: 10,
+      autoFitStep: false,
+      stepMinM: 5,
+      stepMaxM: 90,
+    };
+    const dem = createTaigaCheckpointDem();
+    setInputMode("checkpoint");
+    setCheckpointDem(dem);
+    setCheckpointForm(nextForm);
+    setRawCheckpointHeights(text);
+    try {
+      const solved = buildCheckpointTrajectory({
+        heightsM: parseCheckpointHeights(text),
+        dem,
+        startX: nextForm.startX,
+        startY: nextForm.startY,
+        startCoordinateMode: "pixel",
+        azimuthDeg: nextForm.azimuthDeg,
+        speedMps: nextForm.speedMps,
+        sampleRateHz: nextForm.sampleRateHz,
+        sampleDistanceM: nextForm.speedMps / Math.max(0.001, nextForm.sampleRateHz),
+        autoFitStep: nextForm.autoFitStep,
+        stepMinM: nextForm.stepMinM,
+        stepMaxM: nextForm.stepMaxM,
+      });
+      setCheckpointResult(solved);
+      setCheckpointError(null);
+    } catch (error) {
+      setCheckpointResult(null);
+      setCheckpointError(error instanceof Error ? error.message : "Не удалось рассчитать задание 1.");
+    }
+  }
+
+  async function useCheckpointTask1() {
+    try {
+      const response = await fetch(CHECKPOINT_ROUTE_1_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`route_1.txt недоступен (${response.status})`);
+      applyRoute1Checkpoint(await response.text());
+    } catch (error) {
+      setInputMode("checkpoint");
+      setCheckpointResult(null);
+      setCheckpointError(error instanceof Error ? error.message : "Не удалось загрузить route_1.txt.");
+    }
   }
 
   function exportCheckpointCsv() {
@@ -2259,6 +2345,7 @@ export function App() {
                 onFormChange={updateCheckpointForm}
                 onAnalyze={analyzeCheckpoint}
                 onUseDemo={useCheckpointDemo}
+                onUseTask1={useCheckpointTask1}
                 onExportCsv={exportCheckpointCsv}
               />
             )}

@@ -8,6 +8,8 @@ export type CheckpointDem = {
   name: string;
   width: number;
   height: number;
+  sourceWidth: number;
+  sourceHeight: number;
   values: number[];
   minElevationM: number;
   maxElevationM: number;
@@ -21,6 +23,8 @@ export type CheckpointDem = {
   coordinateMode: CheckpointCoordinateMode;
   crsLabel: string;
 };
+
+export type CheckpointStartCoordinateMode = "local" | "pixel";
 
 export type CheckpointTrajectoryPoint = {
   index: number;
@@ -46,6 +50,9 @@ export type CheckpointTrajectoryResult = {
   azimuthDeg: number;
   startX: number;
   startY: number;
+  inputStartX: number;
+  inputStartY: number;
+  startCoordinateMode: CheckpointStartCoordinateMode;
   points: CheckpointTrajectoryPoint[];
   profileRmseM: number | null;
   profileMaeM: number | null;
@@ -57,6 +64,7 @@ export type CheckpointTrajectoryResult = {
   statusReason: string;
   demName: string;
   crsLabel: string;
+  startConversionNote: string;
   computedAt: string;
   computeMs: number;
 };
@@ -66,6 +74,7 @@ export type BuildCheckpointTrajectoryInput = {
   dem: CheckpointDem | null;
   startX: number;
   startY: number;
+  startCoordinateMode?: CheckpointStartCoordinateMode;
   azimuthDeg: number;
   baroAltitudeM?: number;
   speedMps?: number;
@@ -140,6 +149,46 @@ function sampleRasterByPixel(dem: CheckpointDem, colFloat: number, rowFloat: num
   const top = values[0] * (1 - tx) + values[1] * tx;
   const bottom = values[2] * (1 - tx) + values[3] * tx;
   return top * (1 - ty) + bottom * ty;
+}
+
+export function checkpointPixelToLocal(dem: CheckpointDem, pixelX: number, pixelY: number): { x: number; y: number } {
+  if (!dem.bbox) return { x: pixelX, y: pixelY };
+
+  const maxPixelX = Math.max(1, dem.sourceWidth - 1);
+  const maxPixelY = Math.max(1, dem.sourceHeight - 1);
+  const x = dem.bbox.minX + (pixelX / maxPixelX) * (dem.bbox.maxX - dem.bbox.minX);
+  const y = dem.bbox.maxY - (pixelY / maxPixelY) * (dem.bbox.maxY - dem.bbox.minY);
+  return { x, y };
+}
+
+function resolveStartCoordinates(input: BuildCheckpointTrajectoryInput): {
+  startX: number;
+  startY: number;
+  note: string;
+} {
+  const mode = input.startCoordinateMode ?? "local";
+  if (mode !== "pixel") {
+    return {
+      startX: input.startX,
+      startY: input.startY,
+      note: "Старт X/Y задан в локальных метрах карты.",
+    };
+  }
+
+  if (!input.dem) {
+    return {
+      startX: input.startX,
+      startY: input.startY,
+      note: "Старт X/Y указан в пикселях, но GeoTIFF недоступен: координаты использованы без пересчёта.",
+    };
+  }
+
+  const converted = checkpointPixelToLocal(input.dem, input.startX, input.startY);
+  return {
+    startX: converted.x,
+    startY: converted.y,
+    note: `Старт X/Y переведён из пикселей GeoTIFF ${Math.round(input.startX)} / ${Math.round(input.startY)} в локальные метры ${Math.round(converted.x)} / ${Math.round(converted.y)}.`,
+  };
 }
 
 export function sampleCheckpointDem(dem: CheckpointDem, x: number, y: number): number | null {
@@ -255,12 +304,13 @@ function fitSampleDistanceM(input: BuildCheckpointTrajectoryInput): number {
   const stepMaxM = input.stepMaxM ?? 90;
   const stepResolutionM = input.stepResolutionM ?? 1;
   const baroAltitudeM = input.baroAltitudeM ?? DEFAULT_MATCHER_CONFIG.baroAltitudeM;
+  const start = resolveStartCoordinates(input);
   let bestStepM = fallback;
   let bestRmse = Number.POSITIVE_INFINITY;
   const fitHeights = input.heightsM.slice(0, Math.min(input.heightsM.length, 520));
 
   for (let step = stepMinM; step <= stepMaxM + 0.0001; step += stepResolutionM) {
-    const points = buildPoints(fitHeights, input.dem, input.startX, input.startY, input.azimuthDeg, step, baroAltitudeM);
+    const points = buildPoints(fitHeights, input.dem, start.startX, start.startY, input.azimuthDeg, step, baroAltitudeM);
     const residualRmse = rmse(points.map((point) => point.residualM));
     const coverage = points.filter((point) => point.demHeightM !== null).length / points.length;
     if (residualRmse !== null && coverage >= 0.65 && residualRmse < bestRmse) {
@@ -276,13 +326,14 @@ export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput)
   const startedAt = nowMs();
   const baroAltitudeM = input.baroAltitudeM ?? DEFAULT_MATCHER_CONFIG.baroAltitudeM;
   const sampleRateHz = input.sampleRateHz ?? DEFAULT_MATCHER_CONFIG.sampleRateHz;
+  const start = resolveStartCoordinates(input);
   const sampleDistanceM = fitSampleDistanceM(input);
   const speedMps = sampleDistanceM * sampleRateHz;
   const points = buildPoints(
     input.heightsM,
     input.dem,
-    input.startX,
-    input.startY,
+    start.startX,
+    start.startY,
     input.azimuthDeg,
     sampleDistanceM,
     baroAltitudeM,
@@ -313,8 +364,11 @@ export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput)
     sampleDistanceM,
     routeLengthM,
     azimuthDeg: input.azimuthDeg,
-    startX: input.startX,
-    startY: input.startY,
+    startX: start.startX,
+    startY: start.startY,
+    inputStartX: input.startX,
+    inputStartY: input.startY,
+    startCoordinateMode: input.startCoordinateMode ?? "local",
     points,
     profileRmseM,
     profileMaeM,
@@ -326,6 +380,7 @@ export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput)
     statusReason,
     demName: input.dem?.name ?? "GeoTIFF не загружен",
     crsLabel: input.dem?.crsLabel ?? "нет карты",
+    startConversionNote: start.note,
     computedAt: new Date().toISOString(),
     computeMs: Math.max(0, nowMs() - startedAt),
   };
@@ -372,6 +427,8 @@ export function createTaigaCheckpointDem(): CheckpointDem {
     name: "Встроенный GeoTIFF map.tif",
     width: COPERNICUS_TAIGA_DEM.width,
     height: COPERNICUS_TAIGA_DEM.height,
+    sourceWidth: 3600,
+    sourceHeight: 3600,
     values: COPERNICUS_TAIGA_DEM.elevationM,
     minElevationM: COPERNICUS_TAIGA_DEM.minElevationM,
     maxElevationM: COPERNICUS_TAIGA_DEM.maxElevationM,
@@ -449,6 +506,8 @@ export async function loadCheckpointDemFromGeoTiff(file: File): Promise<Checkpoi
     name: file.name,
     width,
     height,
+    sourceWidth: width,
+    sourceHeight: height,
     values,
     minElevationM,
     maxElevationM,
