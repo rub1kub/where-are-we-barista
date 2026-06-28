@@ -391,7 +391,110 @@ button { color: inherit; cursor: pointer; }
 }
 
 @media (max-width: 760px) {
+  .ops-topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "status status";
+    align-items: center;
+    height: auto;
+    min-height: 68px;
+    gap: 6px 8px;
+    padding: 8px 10px 9px;
+  }
+
+  .brand-block {
+    grid-area: brand;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .brand-icon {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    border-radius: 6px;
+  }
+
+  .brand-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .brand-name {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 17px;
+    letter-spacing: 0.04em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .top-status {
+    grid-area: status;
+    justify-self: stretch;
+    justify-content: center;
+    width: 100%;
+    padding-top: 2px;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+  }
+
+  .top-status svg {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+  }
+
+  .top-actions {
+    grid-area: actions;
+    justify-self: end;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .top-actions button {
+    gap: 0;
+    height: 34px;
+    min-width: 34px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .top-actions .mini-button,
+  .top-actions .action-button {
+    width: 34px;
+    min-width: 34px;
+    padding: 0;
+  }
+
+  .mini-button-caption {
+    display: none;
+  }
+
+  .theme-switcher {
+    height: 34px;
+  }
+
+  .theme-switcher button {
+    width: 30px;
+    height: 32px;
+  }
+
+  .settings-popover {
+    top: 40px;
+    right: 0;
+    width: min(264px, calc(100vw - 20px));
+    border-radius: 8px;
+  }
+
+  .ops-grid {
+    gap: 10px;
+    padding: 10px;
+  }
+
   .ops-grid,
+  .main-area,
   .bottom-grid,
   .status-strip,
   .scenario-switcher,
@@ -401,6 +504,35 @@ button { color: inherit; cursor: pointer; }
 
   .right-rail {
     grid-column: auto;
+  }
+}
+
+@media (max-width: 420px) {
+  .ops-topbar {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .brand-name {
+    font-size: 16px;
+  }
+
+  .top-actions {
+    gap: 4px;
+  }
+
+  .top-actions .mini-button,
+  .top-actions .action-button {
+    width: 32px;
+    min-width: 32px;
+  }
+
+  .theme-switcher button {
+    width: 28px;
+  }
+
+  .top-status {
+    font-size: 8.5px;
   }
 }
 
