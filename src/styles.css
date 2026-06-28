@@ -1,4 +1,4 @@
-/* ─── Design tokens ───────────────────────────────────────────────────────── */
+﻿/* ─── Design tokens ───────────────────────────────────────────────────────── */
 /* Palette: Desert Sand / Olive Drab / Weathered Bronze                       */
 :root {
   color-scheme: light;
@@ -1646,28 +1646,6 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .region-stats b { color: var(--text-2); font-weight: 600; }
 
-/* ─── Methodology ────────────────────────────────────────────────────────── */
-.methodology { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-
-.methodology article {
-  min-height: 120px;
-  padding: 18px;
-  border-radius: 10px;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-  box-shadow: var(--shadow-sm);
-}
-
-.methodology article:first-child { grid-column: 1 / -1; min-height: 100px; }
-
-.methodology h2 { margin: 0; color: var(--text-2); font-size: 32px; font-weight: 200; line-height: 1.05; }
-
-.methodology p,
-.methodology span { display: block; margin: 8px 0 0; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
-
-.methodology strong { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 
 /* ─── 3D flight panel ────────────────────────────────────────────────────── */
 .flight3d-panel header strong { font-size: 18px; }

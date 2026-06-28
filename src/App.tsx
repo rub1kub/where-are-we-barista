@@ -1,4 +1,4 @@
-import { ChangeEvent, ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+﻿import { ChangeEvent, ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -57,7 +57,8 @@ type CheckpointForm = {
   startX: number;
   startY: number;
   azimuthDeg: number;
-  sampleDistanceM: number;
+  speedMps: number;
+  sampleRateHz: number;
   autoFitStep: boolean;
   stepMinM: number;
   stepMaxM: number;
@@ -70,7 +71,7 @@ const MAP_RASTER_HEIGHT = 560;
 const CONTOUR_GRID_COLS = 184;
 const CONTOUR_GRID_ROWS = 106;
 const PX4_DEMO_NMEA_URL = "/examples/px4-derived-radio-altimeter.nmea";
-const VANAVARA_CONTROL_NMEA_URL = "/examples/vanavara-success-radio-altimeter.nmea";
+const CONTROL_NMEA_URL = "/examples/vanavara-success-radio-altimeter.nmea";
 const REPLAY_SPEED_OPTIONS = [30, 60, 120, 240] as const;
 
 const SCENARIO_CONFIGS: Record<Exclude<ScenarioId, "bad-log">, Config> = {
@@ -88,9 +89,9 @@ const SCENARIO_META: Record<ScenarioId, {
   source: string;
 }> = {
   taiga: {
-    label: "Тайга / Ванавара",
-    shortLabel: "Тайга",
-    description: "Основной реальный сэмпл карты высот Copernicus GLO-30.",
+    label: "map.tif / контроль",
+    shortLabel: "map.tif",
+    description: "Основной сэмпл, импортированный из присланного GeoTIFF map.tif.",
     mapTitle: TAIGA_ROUTE.routeName,
     region: TAIGA_ROUTE.region,
     source: TAIGA_ROUTE.demName,
@@ -117,7 +118,7 @@ const SCENARIO_META: Record<ScenarioId, {
     description: "Внешний журнал не соответствует текущей карте высот: ожидается отказ.",
     mapTitle: "Несовместимый журнал",
     region: "проверка отказа от ложной координаты",
-    source: "PX4-derived журнал + карта высот Ванавары",
+    source: "PX4-derived журнал + карта высот map.tif",
   },
 };
 
@@ -437,7 +438,7 @@ function NmeaImportPanel({
           <input accept=".txt,.nmea,.log" type="file" onChange={onFileChange} disabled={isLoading} />
         </label>
         <button type="button" disabled={isLoading} onClick={onUseStandLog}>Пример стенда</button>
-        <button type="button" disabled={isLoading} onClick={onUseControlLog}>{isLoading ? "Загрузка…" : "Контроль Ванавара"}</button>
+        <button type="button" disabled={isLoading} onClick={onUseControlLog}>{isLoading ? "Загрузка…" : "Контроль map.tif"}</button>
         <button type="button" disabled={isLoading} onClick={onUsePx4Log}>{isLoading ? "Загрузка…" : "PX4 пример"}</button>
         <button className="primary" type="button" disabled={isLoading} onClick={onAnalyze}>Рассчитать по журналу</button>
       </div>
@@ -509,19 +510,20 @@ function CheckpointImportPanel({
 
   return (
     <div className="checkpoint-import">
-      <label htmlFor="checkpoint-heights">Высоты TXT, м</label>
+      <label htmlFor="checkpoint-heights">Радиовысоты TXT, м</label>
       <textarea
         id="checkpoint-heights"
         value={rawText}
         onChange={(event) => onTextChange(event.currentTarget.value)}
         spellCheck={false}
-        placeholder={"312.4\n313.1\n314.0"}
+        placeholder={"1287.6\n1286.9\n1286.0"}
       />
       <div className="checkpoint-form-grid">
         <FieldNumber label="Старт X" value={form.startX} onChange={(value) => onFormChange({ startX: value })} />
         <FieldNumber label="Старт Y" value={form.startY} onChange={(value) => onFormChange({ startY: value })} />
         <FieldNumber label="Азимут, °" value={form.azimuthDeg} onChange={(value) => onFormChange({ azimuthDeg: value })} />
-        <FieldNumber label="Шаг, м" value={form.sampleDistanceM} step={0.5} onChange={(value) => onFormChange({ sampleDistanceM: value })} />
+        <FieldNumber label="Скорость, м/с" value={form.speedMps} step={0.5} onChange={(value) => onFormChange({ speedMps: value })} />
+        <FieldNumber label="Частота, Гц" value={form.sampleRateHz} step={0.5} onChange={(value) => onFormChange({ sampleRateHz: value })} />
         <FieldNumber label="Мин. шаг" value={form.stepMinM} step={0.5} onChange={(value) => onFormChange({ stepMinM: value })} />
         <FieldNumber label="Макс. шаг" value={form.stepMaxM} step={0.5} onChange={(value) => onFormChange({ stepMaxM: value })} />
       </div>
@@ -548,6 +550,7 @@ function CheckpointImportPanel({
       </div>
       <div className="nmea-import-state">
         <span>строк <b>{lineCount}</b></span>
+        <span>шаг <b>{formatNumber(form.speedMps / Math.max(0.001, form.sampleRateHz), 1)} м</b></span>
         <span>карта <b>{dem ? `${dem.width}x${dem.height}` : "нет"}</b></span>
         <span>СК <b>{dem?.crsLabel ?? "нет"}</b></span>
       </div>
@@ -1573,6 +1576,14 @@ function CheckpointOutputPanel({ result }: { result: CheckpointTrajectoryResult 
           <b>{formatNumber(result.sampleDistanceM, 1)} м</b>
         </div>
         <div>
+          <span>Скорость</span>
+          <b>{formatNumber(result.speedMps, 1)} м/с</b>
+        </div>
+        <div>
+          <span>Частота</span>
+          <b>{formatNumber(result.sampleRateHz, 1)} Гц</b>
+        </div>
+        <div>
           <span>Финальный X</span>
           <b>{formatNumber(final.x, 0)} м</b>
         </div>
@@ -1656,7 +1667,7 @@ function CheckpointAwaitingState({ rawText, error }: { rawText: string; error: s
           <b>{error ? "ошибка" : lineCount > 0 ? "ожидает расчёт" : "нет входа"}</b>
         </div>
       </div>
-      <p>{error ?? "Загрузите TXT с высотами, укажите старт X/Y и азимут. GeoTIFF нужен для сверки профиля и визуализации карты высот."}</p>
+      <p>{error ?? "Загрузите TXT с радиовысотами, укажите старт X/Y, азимут, скорость и частоту. GeoTIFF нужен для сверки профиля и визуализации карты высот."}</p>
     </section>
   );
 }
@@ -1712,7 +1723,8 @@ export function App() {
     startX: 0,
     startY: 0,
     azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
-    sampleDistanceM: DEFAULT_MATCHER_CONFIG.trueSpeedMps / DEFAULT_MATCHER_CONFIG.sampleRateHz,
+    speedMps: DEFAULT_MATCHER_CONFIG.trueSpeedMps,
+    sampleRateHz: DEFAULT_MATCHER_CONFIG.sampleRateHz,
     autoFitStep: true,
     stepMinM: 5,
     stepMaxM: 90,
@@ -1791,7 +1803,8 @@ export function App() {
       startX: 0,
       startY: 0,
       azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
-      sampleDistanceM: DEFAULT_MATCHER_CONFIG.trueSpeedMps / DEFAULT_MATCHER_CONFIG.sampleRateHz,
+      speedMps: DEFAULT_MATCHER_CONFIG.trueSpeedMps,
+      sampleRateHz: DEFAULT_MATCHER_CONFIG.sampleRateHz,
       autoFitStep: true,
       stepMinM: 5,
       stepMaxM: 90,
@@ -1904,7 +1917,9 @@ export function App() {
         startX: checkpointForm.startX,
         startY: checkpointForm.startY,
         azimuthDeg: checkpointForm.azimuthDeg,
-        sampleDistanceM: checkpointForm.sampleDistanceM,
+        speedMps: checkpointForm.speedMps,
+        sampleRateHz: checkpointForm.sampleRateHz,
+        sampleDistanceM: checkpointForm.speedMps / Math.max(0.001, checkpointForm.sampleRateHz),
         autoFitStep: checkpointForm.autoFitStep,
         stepMinM: checkpointForm.stepMinM,
         stepMaxM: checkpointForm.stepMaxM,
@@ -1923,7 +1938,8 @@ export function App() {
       startX: 0,
       startY: 0,
       azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
-      sampleDistanceM: DEFAULT_MATCHER_CONFIG.trueSpeedMps / DEFAULT_MATCHER_CONFIG.sampleRateHz,
+      speedMps: DEFAULT_MATCHER_CONFIG.trueSpeedMps,
+      sampleRateHz: DEFAULT_MATCHER_CONFIG.sampleRateHz,
       autoFitStep: true,
       stepMinM: 5,
       stepMaxM: 90,
@@ -1940,7 +1956,9 @@ export function App() {
         startX: nextForm.startX,
         startY: nextForm.startY,
         azimuthDeg: nextForm.azimuthDeg,
-        sampleDistanceM: nextForm.sampleDistanceM,
+        speedMps: nextForm.speedMps,
+        sampleRateHz: nextForm.sampleRateHz,
+        sampleDistanceM: nextForm.speedMps / Math.max(0.001, nextForm.sampleRateHz),
         autoFitStep: nextForm.autoFitStep,
         stepMinM: nextForm.stepMinM,
         stepMaxM: nextForm.stepMaxM,
@@ -2003,7 +2021,7 @@ export function App() {
     setNmeaError(null);
     setLoadingNmea(true);
     try {
-      const response = await fetch(VANAVARA_CONTROL_NMEA_URL, { cache: "no-store" });
+      const response = await fetch(CONTROL_NMEA_URL, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const text = await response.text();
       setActiveScenario("taiga");
@@ -2012,7 +2030,7 @@ export function App() {
       solveNmeaText(text, DEFAULT_MATCHER_CONFIG);
     } catch {
       setImportedResult(null);
-      setNmeaError("Не удалось загрузить контрольный журнал Ванавары из examples.");
+      setNmeaError("Не удалось загрузить контрольный журнал map.tif из examples.");
     } finally {
       setLoadingNmea(false);
     }
@@ -2100,7 +2118,7 @@ export function App() {
             <InputRow
               label="Карта высот"
               value={activeScenarioMeta.source}
-              help="Таблица высот земли по району. В рабочем контуре заменяется на Copernicus GLO-30, SRTM или ALOS."
+              help="Таблица высот земли по району. В рабочем контуре заменяется на выданный GeoTIFF, Copernicus GLO-30, SRTM или ALOS."
             />
             <InputRow
               label="Высота MSL"

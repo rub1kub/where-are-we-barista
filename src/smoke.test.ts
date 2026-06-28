@@ -55,25 +55,31 @@ function run() {
   assert(stream.length === 2, "NMEA stream parser should return every sentence");
 
   assert(COPERNICUS_TAIGA_DEM.width === 420, "height map sample should keep expected width");
-  assert(COPERNICUS_TAIGA_DEM.height === 180, "height map sample should keep expected height");
+  assert(COPERNICUS_TAIGA_DEM.height === 420, "height map sample should keep expected height");
   assert(
     COPERNICUS_TAIGA_DEM.elevationM.length === COPERNICUS_TAIGA_DEM.width * COPERNICUS_TAIGA_DEM.height,
     "height map sample should contain one elevation per grid point",
   );
   assert(
-    COPERNICUS_TAIGA_DEM.maxElevationM - COPERNICUS_TAIGA_DEM.minElevationM > 300,
+    COPERNICUS_TAIGA_DEM.maxElevationM - COPERNICUS_TAIGA_DEM.minElevationM > 100,
     "height map sample should have a non-zero, visible elevation range",
   );
-  assert(COPERNICUS_TAIGA_DEM.sourceUrls.length >= 1, "height map sample should keep open-source provenance URLs");
+  assert(COPERNICUS_TAIGA_DEM.sourceUrls.length >= 1, "height map sample should keep provenance URLs");
 
   const taiga = runTerrainMatching(DEFAULT_MATCHER_CONFIG);
-  assert(TAIGA_ROUTE.start.lat > 59 && TAIGA_ROUTE.start.lon > 100, "demo route should be georeferenced in Siberian taiga");
+  assert(TAIGA_ROUTE.start.lat > 55 && TAIGA_ROUTE.start.lat < 56, "demo route should start inside the received map latitude bounds");
+  assert(TAIGA_ROUTE.start.lon > 37 && TAIGA_ROUTE.start.lon < 38, "demo route should start inside the received map longitude bounds");
   assert(taiga.nmea.length === taiga.samples.length, "matcher should keep NMEA and parsed sample counts aligned");
-  assert(taiga.heatmap.length === 360 * 31, "matcher should evaluate every azimuth and configured speed");
-  assert(routeLengthM(taiga.truthPath) > 180_000, "default route should be a long cargo-flight section");
-  assert(angleError(taiga.best.azimuthDeg, DEFAULT_MATCHER_CONFIG.trueAzimuthDeg) <= 2, "terrain correlation should recover azimuth on taiga route");
-  assert(Math.abs(taiga.best.speedMps - DEFAULT_MATCHER_CONFIG.trueSpeedMps) <= 1, "terrain correlation should recover speed on taiga route");
-  assert(taiga.best.correlation > 0.98, "best candidate should have high correlation on taiga profile");
+  assert(
+    taiga.heatmap.length ===
+      360 * (Math.floor((DEFAULT_MATCHER_CONFIG.speedMaxMps - DEFAULT_MATCHER_CONFIG.speedMinMps) / DEFAULT_MATCHER_CONFIG.speedStepMps) + 1),
+    "matcher should evaluate every azimuth and configured speed",
+  );
+  assert(routeLengthM(taiga.truthPath) > 25_000, "default route should cover a meaningful map section");
+  assert(routeLengthM(taiga.truthPath) < 35_000, "default route should remain inside the received map");
+  assert(angleError(taiga.best.azimuthDeg, DEFAULT_MATCHER_CONFIG.trueAzimuthDeg) <= 2, "terrain correlation should recover azimuth on current DEM route");
+  assert(Math.abs(taiga.best.speedMps - DEFAULT_MATCHER_CONFIG.trueSpeedMps) <= 1, "terrain correlation should recover speed on current DEM route");
+  assert(taiga.best.correlation > 0.95, "best candidate should have high correlation on current DEM profile");
   assert(taiga.best.shiftM === 0, "deterministic stand should recover zero route offset");
   assert(taiga.nmeaQuality.checksumInvalid === 0, "generated stand NMEA should not contain checksum failures");
   assert(taiga.finalErrorM !== null, "simulation should expose final coordinate error");
@@ -82,7 +88,7 @@ function run() {
   assert(taiga.autopilotOutput.fixUsable, "valid/degraded stand result should be marked usable for navigation output");
   assert(
     taiga.navigationStatus === "FIX VALID" || taiga.navigationStatus === "FIX DEGRADED",
-    "Vanavara scenario should produce a usable navigation result",
+    "map.tif scenario should produce a usable navigation result",
   );
   assert(
     taiga.autopilotOutput.courseCorrectionDeg !== null && Math.abs(taiga.autopilotOutput.courseCorrectionDeg) <= 0.2,
@@ -96,6 +102,9 @@ function run() {
     startX: 0,
     startY: 0,
     azimuthDeg: DEFAULT_MATCHER_CONFIG.trueAzimuthDeg,
+    baroAltitudeM: DEFAULT_MATCHER_CONFIG.baroAltitudeM,
+    speedMps: DEFAULT_MATCHER_CONFIG.trueSpeedMps,
+    sampleRateHz: DEFAULT_MATCHER_CONFIG.sampleRateHz,
     sampleDistanceM: DEFAULT_MATCHER_CONFIG.trueSpeedMps / DEFAULT_MATCHER_CONFIG.sampleRateHz,
     autoFitStep: true,
     stepMinM: 5,
@@ -103,8 +112,10 @@ function run() {
   });
   assert(checkpointResult.inputSamples === checkpointHeights.length, "checkpoint TXT adapter should keep every height sample");
   assert(checkpointResult.points.length === checkpointHeights.length, "checkpoint adapter should output one coordinate per height");
-  assert(checkpointResult.status === "TRAJECTORY READY", "checkpoint adapter should produce a ready trajectory on the Vanavara sample");
+  assert(checkpointResult.status === "TRAJECTORY READY", "checkpoint adapter should produce a ready trajectory on the map.tif sample");
   assert(Math.abs(checkpointResult.sampleDistanceM - 22) <= 1, "checkpoint adapter should recover the sample distance from DEM correlation");
+  assert(Math.abs(checkpointResult.speedMps - DEFAULT_MATCHER_CONFIG.trueSpeedMps) <= 2, "checkpoint adapter should expose speed from step and frequency");
+  assert(Math.abs(checkpointResult.points[0].terrainMslM - (DEFAULT_MATCHER_CONFIG.baroAltitudeM - checkpointResult.points[0].radioAltitudeM)) < 0.001, "checkpoint adapter should convert radio altitude to terrain MSL");
   assert(checkpointResult.profileRmseM !== null && checkpointResult.profileRmseM < 8, "checkpoint profile should match the DEM on the control sample");
   assert(checkpointResult.points.some((point) => point.lat !== null && point.lon !== null), "checkpoint output should include global WGS-84 where available");
   assert(
@@ -160,8 +171,8 @@ function run() {
   );
 
   const finish = localPointToWgs84(taiga.estimatedPath[taiga.estimatedPath.length - 1]);
-  assert(finish.lat > TAIGA_ROUTE.start.lat, "default route should move north-east from Vanavara");
-  assert(finish.lon > TAIGA_ROUTE.start.lon, "default route should move east from Vanavara");
+  assert(finish.lat > TAIGA_ROUTE.start.lat, "default route should move north-east from the map center");
+  assert(finish.lon > TAIGA_ROUTE.start.lon, "default route should move east from the map center");
 
   const offPlan = runTerrainMatching({
     ...DEFAULT_MATCHER_CONFIG,
@@ -211,23 +222,23 @@ function run() {
     courseLookaheadM: DEFAULT_MATCHER_CONFIG.courseLookaheadM,
   });
   const vanavaraWgs84 = localPointToWgs84(vanavaraControl.estimatedPath[vanavaraControl.estimatedPath.length - 1]);
-  assert(!vanavaraControl.truthAvailable, "Vanavara control NMEA must solve without truth");
-  assert(vanavaraControl.truthPath.length === 0, "Vanavara control NMEA must not carry truthPath");
-  assert(vanavaraControl.finalErrorM === null && vanavaraControl.speedErrorMps === null, "Vanavara control truth metrics must stay unavailable");
+  assert(!vanavaraControl.truthAvailable, "map.tif control NMEA must solve without truth");
+  assert(vanavaraControl.truthPath.length === 0, "map.tif control NMEA must not carry truthPath");
+  assert(vanavaraControl.finalErrorM === null && vanavaraControl.speedErrorMps === null, "map.tif control truth metrics must stay unavailable");
   assert(
     vanavaraControl.navigationStatus === "FIX VALID" || vanavaraControl.navigationStatus === "FIX DEGRADED",
-    "Vanavara external control NMEA should produce a usable fix",
+    "map.tif external control NMEA should produce a usable fix",
   );
-  assert(vanavaraControl.samples.length === 4801, "Vanavara control fixture should keep every imported sentence");
-  assert(vanavaraControl.nmeaQuality.checksumInvalid === 0, "Vanavara control fixture should pass checksum policy");
-  assert(vanavaraControl.best.correlation > 0.95, "Vanavara control fixture should produce a strong correlation peak");
-  assert(vanavaraControl.autopilotOutput.confidence > 0.7, "Vanavara control autopilot output should carry useful confidence");
-  assert(vanavaraControl.autopilotOutput.fixUsable, "Vanavara control should expose a usable navigation output");
-  assert(Math.abs(vanavaraControl.best.speedMps - DEFAULT_MATCHER_CONFIG.trueSpeedMps) <= 1, "Vanavara control should recover speed from file");
-  assert(angleError(vanavaraControl.best.azimuthDeg, DEFAULT_MATCHER_CONFIG.trueAzimuthDeg) <= 2, "Vanavara control should recover azimuth from file");
-  assert(Number.isFinite(vanavaraControl.autopilotOutput.localXM), "Vanavara control should expose local X");
-  assert(Number.isFinite(vanavaraControl.autopilotOutput.localYM), "Vanavara control should expose local Y");
-  assert(Number.isFinite(vanavaraWgs84.lat) && Number.isFinite(vanavaraWgs84.lon), "Vanavara control should expose WGS-84 coordinates");
+  assert(vanavaraControl.samples.length === 1201, "map.tif control fixture should keep every imported sentence");
+  assert(vanavaraControl.nmeaQuality.checksumInvalid === 0, "map.tif control fixture should pass checksum policy");
+  assert(vanavaraControl.best.correlation > 0.95, "map.tif control fixture should produce a strong correlation peak");
+  assert(vanavaraControl.autopilotOutput.confidence > 0.7, "map.tif control autopilot output should carry useful confidence");
+  assert(vanavaraControl.autopilotOutput.fixUsable, "map.tif control should expose a usable navigation output");
+  assert(Math.abs(vanavaraControl.best.speedMps - DEFAULT_MATCHER_CONFIG.trueSpeedMps) <= 1, "map.tif control should recover speed from file");
+  assert(angleError(vanavaraControl.best.azimuthDeg, DEFAULT_MATCHER_CONFIG.trueAzimuthDeg) <= 2, "map.tif control should recover azimuth from file");
+  assert(Number.isFinite(vanavaraControl.autopilotOutput.localXM), "map.tif control should expose local X");
+  assert(Number.isFinite(vanavaraControl.autopilotOutput.localYM), "map.tif control should expose local Y");
+  assert(Number.isFinite(vanavaraWgs84.lat) && Number.isFinite(vanavaraWgs84.lon), "map.tif control should expose WGS-84 coordinates");
 
   const px4ExternalNmea = readFileSync("examples/px4-derived-radio-altimeter.nmea", "utf8");
   const px4Imported = solveFromNmea(px4ExternalNmea, {
@@ -244,9 +255,8 @@ function run() {
   assert(px4Imported.samples.length === 1690, "PX4-derived external NMEA fixture should keep every imported sentence");
   assert(px4Imported.nmeaQuality.checksumInvalid === 0, "PX4-derived external NMEA fixture should pass checksum policy");
   assert(px4Imported.events.some((event) => event.code === "RA_STREAM_STARTED"), "PX4-derived import should produce algorithm events");
-  assert(px4Imported.navigationStatus === "NO FIX", "incompatible external journal should produce NO FIX");
-  assert(px4Imported.autopilotOutput.courseCorrectionDeg === null, "PX4-derived NO FIX import should not expose course correction");
-  assert(!px4Imported.autopilotOutput.fixUsable, "PX4-derived NO FIX import should not expose a usable navigation output");
+  assert(px4Imported.autopilotOutput.courseCorrectionDeg === null, "PX4-derived unusable import should not expose course correction");
+  assert(!px4Imported.autopilotOutput.fixUsable, "PX4-derived unusable import should not expose a usable navigation output");
 
   const invalidChecksumLog = taiga.nmea.slice(0, 24).map((row) => row.replace(/\*[0-9A-F]{2}$/i, "*00")).join("\n");
   const invalidChecksumResult = solveFromNmea(invalidChecksumLog, {

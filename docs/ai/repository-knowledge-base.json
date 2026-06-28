@@ -10,8 +10,8 @@
   },
   "missionScenario": {
     "type": "гражданская доставка груза",
-    "region": "Красноярский край, средняя тайга",
-    "route": "Ванавара → геологоразведочный лагерь",
+    "region": "Полученная карта 55.00-56.00 N, 37.00-38.00 E",
+    "route": "map.tif → геологоразведочный лагерь",
     "navigationState": "на входе алгоритма только РВ, высота 1500 м MSL и карта высот",
     "safetyBoundary": "Не добавлять военное применение, наведение, поражение, тактические рекомендации или оружейные сценарии."
   },
@@ -19,8 +19,8 @@
     "inputs": [
       "постоянная высота MSL: 1500 м",
       "РВ AGL: радиовысота в NMEA-0183",
-      "для третьего чекпоинта: TXT с высотами по строкам",
-      "карта высот: Copernicus DEM GLO-30 сэмпл района",
+      "для третьего чекпоинта: TXT с радиовысотами по строкам",
+      "карта высот: локальный GeoTIFF map.tif сэмпл района",
       "для третьего чекпоинта: участок карты GeoTIFF",
       "стартовая точка x,y и направление движения",
       "диапазон путевой скорости",
@@ -51,7 +51,7 @@
   },
   "dataSources": {
     "dem": {
-      "activeSource": "Copernicus DEM GLO-30 COG",
+      "activeSource": "GeoTIFF map.tif",
       "generatedFile": "src/copernicusDemSample.ts",
       "generator": "scripts/generate-dem-sample.mjs",
       "sourceTiles": [
@@ -91,10 +91,10 @@
     },
     "checkpoint3": {
       "uiMode": "Чекпоинт 3",
-      "input": "TXT с высотами по строкам, GeoTIFF, старт X/Y, азимут",
+      "input": "TXT с радиовысотами по строкам, GeoTIFF, старт X/Y, азимут, скорость, частота",
       "implementation": "src/checkpoint3.ts",
-      "output": "CSV и UI-таблица: index, distance_m, local_x, local_y, lat, lon, height_txt_m, height_dem_m, residual_m",
-      "notes": "локальные X/Y выдаются всегда; WGS-84 выдаётся только для WGS-84 GeoTIFF или встроенной Ванавары; для другой проекции нельзя подделывать lat/lon"
+      "output": "CSV и UI-таблица: index, distance_m, local_x, local_y, lat, lon, radio_altitude_m, terrain_msl_from_radio_m, height_dem_m, residual_m",
+      "notes": "локальные X/Y выдаются всегда; WGS-84 выдаётся только для WGS-84 GeoTIFF или встроенной map.tif; для другой проекции нельзя подделывать lat/lon"
     }
   },
   "commands": {
@@ -164,7 +164,7 @@
   },
   "files": {
     "src/terrainMatcher.ts": "корреляционный алгоритм, DEM-сэмплирование, confidence, маршруты",
-    "src/copernicusDemSample.ts": "сгенерированная таблица высот Copernicus DEM",
+    "src/copernicusDemSample.ts": "сгенерированная таблица высот из GeoTIFF map.tif",
     "scripts/generate-dem-sample.mjs": "загрузка COG-тайлов и генерация DEM-сэмпла",
     "src/nmeaRadioAltimeter.ts": "NMEA-0183 радиовысотомера",
     "src/checkpoint3.ts": "адаптер TXT высот + GeoTIFF для третьего чекпоинта",
@@ -217,7 +217,7 @@
   "knownRisks": [
     "DEM-сэмпл покрывает демонстрационный район, но не является полноценным тайловым DEM-движком для любого маршрута.",
     "Режим третьего чекпоинта читает GeoTIFF в браузере, но WGS-84 lat/lon выдаёт только для WGS-84 или встроенного сэмпла; для проектных CRS нужен отдельный EPSG-преобразователь.",
-    "Финальный проверочный NMEA-журнал радиовысотомера пока не получен; внешний успешный режим проверяется на synthetic control log по текущему DEM. PX4-derived NMEA используется как negative NO FIX case.",
+    "Финальный проверочный набор чекпоинта будет состоять из TXT радиовысот, стартовой точки, азимута, скорости, частоты и GeoTIFF; PX4-derived NMEA используется как negative unusable-fix case.",
     "3D-превью показывает ход полёта по найденной траектории, но не является полноценным физическим авиасимулятором.",
     "Для бортового вычислителя потребуется профилирование и перенос тяжёлого перебора в WebWorker, WASM или отдельный нативный модуль.",
     "C++ ядро является техническим прототипом расчётной части и не интегрировано во фронт или автопилот."

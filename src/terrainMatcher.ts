@@ -138,17 +138,17 @@ export type TerrainMatchResult = {
 };
 
 export const TAIGA_ROUTE = {
-  region: "Красноярский край, средняя тайга",
-  routeName: "Ванавара → геологоразведочный лагерь",
-  startName: "Ванавара",
-  finishName: "лагерь",
-  riverName: "Подкаменная Тунгуска",
-  demName: "Copernicus GLO-30 / карта высот",
+  region: COPERNICUS_TAIGA_DEM.region,
+  routeName: "Центр карты → контрольный профиль",
+  startName: "центр карты",
+  finishName: "контрольная точка",
+  riverName: "профиль map.tif",
+  demName: "Локальный GeoTIFF / карта высот",
   start: {
-    lat: 60.3446,
-    lon: 102.2797,
+    lat: (COPERNICUS_TAIGA_DEM.bounds.latMin + COPERNICUS_TAIGA_DEM.bounds.latMax) / 2,
+    lon: (COPERNICUS_TAIGA_DEM.bounds.lonMin + COPERNICUS_TAIGA_DEM.bounds.lonMax) / 2,
   },
-  note: "Гражданская доставка груза в район без плотной наземной инфраструктуры.",
+  note: "Проверка алгоритма на присланной карте высот без дополнительных датчиков.",
 };
 
 const SHIFT_CANDIDATES_M = [-3000, -1500, 0, 1500, 3000];
@@ -157,14 +157,14 @@ export const DEFAULT_MATCHER_CONFIG: MatcherConfig = {
   terrainKind: "taiga",
   baroAltitudeM: 1500,
   sampleRateHz: 2,
-  durationS: 4200,
+  durationS: 600,
   trueSpeedMps: 44,
   trueAzimuthDeg: 73,
   plannedAzimuthDeg: 73,
   courseLookaheadM: 2500,
   radioNoiseM: 3,
   speedMinMps: 35,
-  speedMaxMps: 65,
+  speedMaxMps: 55,
   speedStepMps: 1,
 };
 

@@ -27,6 +27,8 @@ export type CheckpointTrajectoryPoint = {
   distanceM: number;
   x: number;
   y: number;
+  radioAltitudeM: number;
+  terrainMslM: number;
   measuredHeightM: number;
   demHeightM: number | null;
   residualM: number | null;
@@ -36,6 +38,9 @@ export type CheckpointTrajectoryPoint = {
 
 export type CheckpointTrajectoryResult = {
   inputSamples: number;
+  baroAltitudeM: number;
+  speedMps: number;
+  sampleRateHz: number;
   sampleDistanceM: number;
   routeLengthM: number;
   azimuthDeg: number;
@@ -57,6 +62,9 @@ export type BuildCheckpointTrajectoryInput = {
   startX: number;
   startY: number;
   azimuthDeg: number;
+  baroAltitudeM?: number;
+  speedMps?: number;
+  sampleRateHz?: number;
   sampleDistanceM?: number;
   autoFitStep?: boolean;
   stepMinM?: number;
@@ -87,13 +95,13 @@ export function parseCheckpointHeights(text: string): number[] {
     const value = toFiniteNumber(row);
     if (value === null) return;
     if (Number.isNaN(value)) {
-      throw new Error(`Строка ${index + 1}: ожидалась высота в метрах.`);
+      throw new Error(`Строка ${index + 1}: ожидалась радиовысота в метрах.`);
     }
     heights.push(value);
   });
 
   if (heights.length < 2) {
-    throw new Error("Нужен TXT-файл минимум с двумя высотами.");
+    throw new Error("Нужен TXT-файл минимум с двумя радиовысотами.");
   }
 
   return heights;
@@ -152,15 +160,17 @@ function buildPoints(
   startY: number,
   azimuthDeg: number,
   sampleDistanceM: number,
+  baroAltitudeM: number,
 ): CheckpointTrajectoryPoint[] {
   const azimuth = degToRad(azimuthDeg);
   const sinAzimuth = Math.sin(azimuth);
   const cosAzimuth = Math.cos(azimuth);
 
-  return heightsM.map((height, index) => {
+  return heightsM.map((radioAltitudeM, index) => {
     const distanceM = index * sampleDistanceM;
     const x = startX + sinAzimuth * distanceM;
     const y = startY + cosAzimuth * distanceM;
+    const terrainMslM = baroAltitudeM - radioAltitudeM;
     const demHeightM = dem ? sampleCheckpointDem(dem, x, y) : null;
     const wgs = pointToWgs84(dem, x, y);
 
@@ -169,9 +179,11 @@ function buildPoints(
       distanceM,
       x,
       y,
-      measuredHeightM: height,
+      radioAltitudeM,
+      terrainMslM,
+      measuredHeightM: terrainMslM,
       demHeightM,
-      residualM: demHeightM === null ? null : height - demHeightM,
+      residualM: demHeightM === null ? null : terrainMslM - demHeightM,
       lat: wgs?.lat ?? null,
       lon: wgs?.lon ?? null,
     };
@@ -179,18 +191,23 @@ function buildPoints(
 }
 
 function fitSampleDistanceM(input: BuildCheckpointTrajectoryInput): number {
-  const fallback = input.sampleDistanceM ?? 22;
+  const fallback = input.sampleDistanceM ?? (
+    input.speedMps && input.sampleRateHz && input.sampleRateHz > 0
+      ? input.speedMps / input.sampleRateHz
+      : 22
+  );
   if (!input.autoFitStep || !input.dem || !input.dem.bbox) return fallback;
 
   const stepMinM = input.stepMinM ?? 5;
   const stepMaxM = input.stepMaxM ?? 90;
   const stepResolutionM = input.stepResolutionM ?? 1;
+  const baroAltitudeM = input.baroAltitudeM ?? DEFAULT_MATCHER_CONFIG.baroAltitudeM;
   let bestStepM = fallback;
   let bestRmse = Number.POSITIVE_INFINITY;
   const fitHeights = input.heightsM.slice(0, Math.min(input.heightsM.length, 520));
 
   for (let step = stepMinM; step <= stepMaxM + 0.0001; step += stepResolutionM) {
-    const points = buildPoints(fitHeights, input.dem, input.startX, input.startY, input.azimuthDeg, step);
+    const points = buildPoints(fitHeights, input.dem, input.startX, input.startY, input.azimuthDeg, step, baroAltitudeM);
     const residualRmse = rmse(points.map((point) => point.residualM));
     const coverage = points.filter((point) => point.demHeightM !== null).length / points.length;
     if (residualRmse !== null && coverage >= 0.65 && residualRmse < bestRmse) {
@@ -203,7 +220,10 @@ function fitSampleDistanceM(input: BuildCheckpointTrajectoryInput): number {
 }
 
 export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput): CheckpointTrajectoryResult {
+  const baroAltitudeM = input.baroAltitudeM ?? DEFAULT_MATCHER_CONFIG.baroAltitudeM;
+  const sampleRateHz = input.sampleRateHz ?? DEFAULT_MATCHER_CONFIG.sampleRateHz;
   const sampleDistanceM = fitSampleDistanceM(input);
+  const speedMps = sampleDistanceM * sampleRateHz;
   const points = buildPoints(
     input.heightsM,
     input.dem,
@@ -211,13 +231,14 @@ export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput)
     input.startY,
     input.azimuthDeg,
     sampleDistanceM,
+    baroAltitudeM,
   );
   const profileRmseM = rmse(points.map((point) => point.residualM));
   const coverageRatio = points.filter((point) => point.demHeightM !== null).length / points.length;
   const routeLengthM = Math.max(0, points.length - 1) * sampleDistanceM;
 
   let status: CheckpointTrajectoryResult["status"] = "TRAJECTORY READY";
-  let statusReason = "Траектория построена по TXT-высотам, стартовой точке и азимуту.";
+  let statusReason = "Траектория построена по TXT-радиовысотам, стартовой точке, азимуту, скорости и частоте.";
   if (!input.dem || !input.dem.bbox) {
     status = "DEM UNAVAILABLE";
     statusReason = "GeoTIFF не загружен или без геопривязки: координаты построены, профиль с картой не сверен.";
@@ -228,6 +249,9 @@ export function buildCheckpointTrajectory(input: BuildCheckpointTrajectoryInput)
 
   return {
     inputSamples: input.heightsM.length,
+    baroAltitudeM,
+    speedMps,
+    sampleRateHz,
     sampleDistanceM,
     routeLengthM,
     azimuthDeg: input.azimuthDeg,
@@ -252,7 +276,8 @@ export function checkpointResultToCsv(result: CheckpointTrajectoryResult): strin
     "local_y",
     "lat",
     "lon",
-    "height_txt_m",
+    "radio_altitude_m",
+    "terrain_msl_from_radio_m",
     "height_dem_m",
     "residual_m",
   ];
@@ -263,7 +288,8 @@ export function checkpointResultToCsv(result: CheckpointTrajectoryResult): strin
     point.y.toFixed(2),
     point.lat === null ? "" : point.lat.toFixed(8),
     point.lon === null ? "" : point.lon.toFixed(8),
-    point.measuredHeightM.toFixed(2),
+    point.radioAltitudeM.toFixed(2),
+    point.terrainMslM.toFixed(2),
     point.demHeightM === null ? "" : point.demHeightM.toFixed(2),
     point.residualM === null ? "" : point.residualM.toFixed(2),
   ]);
@@ -280,7 +306,7 @@ export function createTaigaCheckpointDem(): CheckpointDem {
   const localMaxY = (COPERNICUS_TAIGA_DEM.bounds.latMax - TAIGA_ROUTE.start.lat) * metersPerDegreeLat;
 
   return {
-    name: "Встроенный Copernicus GLO-30 / Ванавара",
+    name: "Встроенный GeoTIFF map.tif",
     width: COPERNICUS_TAIGA_DEM.width,
     height: COPERNICUS_TAIGA_DEM.height,
     values: COPERNICUS_TAIGA_DEM.elevationM,
@@ -294,13 +320,13 @@ export function createTaigaCheckpointDem(): CheckpointDem {
       maxY: localMaxY,
     },
     coordinateMode: "taiga-local",
-    crsLabel: "локальные метры Ванавары + WGS-84",
+    crsLabel: "локальные метры map.tif + WGS-84",
   };
 }
 
 export function buildCheckpointDemoText(): string {
   const simulation = simulateFlight(DEFAULT_MATCHER_CONFIG);
-  return simulation.measuredProfile.map((value) => value.toFixed(2)).join("\n");
+  return simulation.samples.map((sample) => sample.radioAltitudeM.toFixed(2)).join("\n");
 }
 
 function finiteRasterValues(values: ArrayLike<number>, noDataValue: number | null): {

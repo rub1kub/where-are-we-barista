@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dem:generate": "node scripts/generate-dem-sample.mjs",
+    "dem:import-local": "node scripts/import-local-dem.mjs",
     "nmea:analyze": "node scripts/analyze-nmea.mjs",
+    "nmea:generate-control": "node scripts/generate-control-nmea.mjs",
     "nmea:generate-demo": "node scripts/generate-px4-nmea-demo.mjs",
     "build": "tsc --noEmit && node scripts/build.mjs",
     "test": "node scripts/test.mjs"

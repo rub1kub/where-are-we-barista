@@ -17,7 +17,7 @@ Options:
   --baro <m>             barometric altitude MSL, default 1500
   --sample-rate <hz>     fallback sample rate, default 2
   --speed-min <mps>      search min speed, default 35
-  --speed-max <mps>      search max speed, default 65
+  --speed-max <mps>      search max speed, default 55
   --speed-step <mps>     speed step, default 1
   --planned-azimuth <°>  planned route azimuth for course correction, default 73
   --lookahead <m>        route lookahead for course correction, default 2500
@@ -82,7 +82,7 @@ const request = {
   baroAltitudeM: readNumberOption(args, "--baro", 1500),
   sampleRateHz: readNumberOption(args, "--sample-rate", 2),
   speedMinMps: readNumberOption(args, "--speed-min", 35),
-  speedMaxMps: readNumberOption(args, "--speed-max", 65),
+  speedMaxMps: readNumberOption(args, "--speed-max", 55),
   speedStepMps: readNumberOption(args, "--speed-step", 1),
   plannedAzimuthDeg: readNumberOption(args, "--planned-azimuth", 73),
   courseLookaheadM: readNumberOption(args, "--lookahead", 2500),
