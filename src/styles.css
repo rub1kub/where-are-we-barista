@@ -1718,3 +1718,178 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   background: rgba(23, 25, 16, 0.78);
   color: rgba(139, 154, 86, 0.90);
 }
+
+/* ─── Mobile final overrides: keep desktop layout untouched ─────────────── */
+@media (max-width: 760px) {
+  .ops-shell {
+    padding-top: 72px;
+  }
+
+  .ops-topbar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 0;
+    width: 100%;
+    z-index: 100;
+  }
+
+  .ops-grid,
+  .main-area,
+  .right-rail,
+  .scenario-switcher,
+  .status-strip,
+  .bottom-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .scenario-grid {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .scenario-grid button {
+    width: 100%;
+    min-height: 58px;
+    grid-template-columns: 30px minmax(0, 1fr);
+    padding: 8px;
+  }
+
+  .scenario-grid i {
+    width: 30px;
+    height: 30px;
+  }
+
+  .scenario-grid span,
+  .scenario-grid small,
+  .status-strip strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .status-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .status-strip div {
+    padding: 10px 11px;
+  }
+
+  .status-strip div:first-child,
+  .status-strip div:nth-child(2) {
+    grid-column: 1 / -1;
+  }
+
+  .bottom-grid,
+  .bottom-grid > *,
+  .profile-panel,
+  .profile-chart {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .profile-panel {
+    overflow: hidden;
+  }
+
+  .profile-panel header {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .profile-panel .chart-legend {
+    width: 100%;
+  }
+
+  .profile-chart {
+    min-height: 180px;
+  }
+
+  .profile-chart path {
+    vector-effect: non-scaling-stroke;
+  }
+
+  .stepper {
+    grid-template-columns: 40px minmax(54px, 1fr) 40px;
+    gap: 8px;
+  }
+
+  .stepper button {
+    width: 40px;
+    height: 36px;
+    min-width: 40px;
+    border-radius: 7px;
+  }
+
+  .rail-title button {
+    width: 40px;
+    height: 36px;
+    border-radius: 7px;
+  }
+
+  .help > span {
+    position: fixed;
+    top: 82px;
+    right: 10px;
+    left: 10px;
+    bottom: auto;
+    width: auto;
+    max-width: none;
+  }
+
+  .map-head,
+  .panel header {
+    align-items: flex-start;
+  }
+
+  .map-legend,
+  .chart-legend {
+    gap: 7px 10px;
+    font-size: 10px;
+  }
+
+  .flight3d-hud {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .flight3d-hud span {
+    padding: 6px 8px;
+    overflow: hidden;
+    font-size: 9px;
+    text-overflow: ellipsis;
+  }
+
+  .nmea-import-actions,
+  .nmea-import-state {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  .top-actions .mini-button,
+  .top-actions .action-button {
+    width: 34px;
+    min-width: 34px;
+  }
+
+  .scenario-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .map-head,
+  .panel header {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .map-legend,
+  .chart-legend,
+  .map-foot {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
